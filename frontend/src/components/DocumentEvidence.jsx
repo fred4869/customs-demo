@@ -1,4 +1,5 @@
 import { displayFilename } from '../lib/filenames'
+import { isReadableSnippet, toDisplaySnippet } from '../lib/textQuality'
 
 export default function DocumentEvidence({ document, compact = false }) {
   if (!document) {
@@ -31,17 +32,23 @@ export default function DocumentEvidence({ document, compact = false }) {
       </div>
       {!compact && (
         <div className="evidence-preview">
-          <label>原文预览</label>
-          <pre>{document.raw_text?.slice(0, 3200) || document.text_excerpt || '无可预览文本'}</pre>
+          <label>来源片段</label>
+          <pre>{toDisplaySnippet(document.raw_text?.slice(0, 3200) || document.text_excerpt, '当前文件未生成可直接展示的文本片段，请以上方原始文件预览为准。')}</pre>
         </div>
       )}
       <div className="evidence-grid">
-        {(document.evidence_blocks || []).slice(0, compact ? 6 : 30).map((block) => (
+        {(document.evidence_blocks || []).filter((block) => isReadableSnippet(block.text)).slice(0, compact ? 6 : 30).map((block) => (
           <article key={block.id} className="evidence-card">
             <small>{block.id}</small>
             <p>{block.text}</p>
           </article>
         ))}
+        {!(document.evidence_blocks || []).filter((block) => isReadableSnippet(block.text)).length && (
+          <article className="evidence-card">
+            <small>系统提示</small>
+            <p>当前文件未抽取到适合直接展示的文本片段，页面以原始文件预览为主。</p>
+          </article>
+        )}
       </div>
     </section>
   )

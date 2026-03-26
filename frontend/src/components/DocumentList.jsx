@@ -1,4 +1,5 @@
 import { displayFilename } from '../lib/filenames'
+import { toDisplaySnippet } from '../lib/textQuality'
 
 export default function DocumentList({ documents, selectedId, onSelect }) {
   return (
@@ -18,7 +19,7 @@ export default function DocumentList({ documents, selectedId, onSelect }) {
               <strong>{displayFilename(document.file_name)}</strong>
               <span className={`tag tag-${document.document_type}`}>{toDocumentTypeLabel(document.document_type)}</span>
             </div>
-            <p className="muted">{(document.text_excerpt || '无可预览文本').slice(0, 120)}</p>
+            <p className="muted">{toDisplaySnippet(document.text_excerpt, '已加载原始文件预览，摘要内容已收起').slice(0, 120)}</p>
             <div className="mini-block">
               <div>
                 <label>字段候选</label>

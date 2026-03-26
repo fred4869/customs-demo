@@ -14,6 +14,41 @@ export function normalizeWhitespace(value = '') {
   return String(value).replace(/[\s ]+/g, ' ').trim()
 }
 
+export function isReadableExtractedText(value = '') {
+  const text = String(value || '')
+  if (!text.trim()) return false
+
+  const sample = text.slice(0, 4000)
+  const normalized = normalizeWhitespace(sample)
+  if (!normalized) return false
+
+  const pdfSignals = [
+    /%PDF-\d\.\d/,
+    /\bendobj\b/i,
+    /\bobj\b/i,
+    /\bxref\b/i,
+    /\btrailer\b/i,
+    /\bstartxref\b/i,
+    /\bFlateDecode\b/i,
+    /\/Type\/Page/i
+  ]
+  if (pdfSignals.filter((pattern) => pattern.test(sample)).length >= 2) return false
+
+  const replacementChars = (sample.match(/[�]/g) || []).length
+  if (replacementChars > sample.length * 0.01) return false
+
+  const mojibakeChars = (sample.match(/[ÃÂÐÑÈÊËÌÍÎÏÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]/g) || []).length
+  if (mojibakeChars > sample.length * 0.02) return false
+
+  const underscoreRuns = (sample.match(/_{20,}/g) || []).length
+  if (underscoreRuns >= 2) return false
+
+  const visibleChars = (sample.match(/[\u4e00-\u9fffA-Za-z0-9，。、“”‘’：；！？,.:'"()\-/%$#@&\s]/g) || []).length
+  if (visibleChars / sample.length < 0.72) return false
+
+  return true
+}
+
 export function normalizeKey(value = '') {
   return normalizeWhitespace(value).toLowerCase()
 }

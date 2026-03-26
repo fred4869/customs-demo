@@ -12,6 +12,7 @@ import {
   normalizeWhitespace,
   parseNumber,
   round2,
+  isReadableExtractedText,
   toFileId,
   uniqBy
 } from '../lib/utils.js'
@@ -183,15 +184,17 @@ async function readFileText(file) {
       const { PDFParse } = await import('pdf-parse')
       parser = new PDFParse({ data: file.buffer })
       const result = await parser.getText()
-      if (result.text?.trim()) return result.text
+      if (isReadableExtractedText(result.text)) return result.text
     } catch {
-      // ignore and use binary fallback below
+      // ignore and fall through
     } finally {
       await parser?.destroy().catch(() => {})
     }
+    return ''
   }
 
-  return file.buffer.toString('utf8').replace(/\u0000/g, ' ')
+  const decoded = file.buffer.toString('utf8').replace(/\u0000/g, ' ')
+  return isReadableExtractedText(decoded) ? decoded : ''
 }
 
 function classifyDocument(filename, text) {
@@ -221,11 +224,15 @@ function extractStructuredData({ fileId, sourceIndex, filename, documentType, te
     source_index: sourceIndex,
     file_name: filename,
     document_type: documentType,
-    text_excerpt: normalizeWhitespace(text).slice(0, 800),
-    raw_text: text,
+    text_excerpt: isReadableExtractedText(text) ? normalizeWhitespace(text).slice(0, 800) : '',
+    raw_text: isReadableExtractedText(text) ? text : '',
     header_candidates: header,
     line_items: lineItems,
-    evidence_blocks: lines.slice(0, 30).map((line, index) => ({ id: `${fileId}:line:${index + 1}`, text: line }))
+    evidence_blocks: lines
+      .filter((line) => isReadableExtractedText(line))
+      .filter((line) => !/^[_\-=]{10,}$/.test(line))
+      .slice(0, 30)
+      .map((line, index) => ({ id: `${fileId}:line:${index + 1}`, text: line }))
   }
 }
 
