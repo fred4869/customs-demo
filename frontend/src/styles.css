@@ -308,41 +308,47 @@ h2 {
 .overview-input-panel,
 .workflow-stage {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .input-entry-shell {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) 56px minmax(0, 1.35fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1.15fr);
+  gap: 10px;
   align-items: stretch;
 }
 
 .input-entry {
-  padding: 16px;
+  padding: 10px 12px;
   border: 1px solid rgba(8, 76, 97, 0.1);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.7);
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .input-entry-head {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .input-entry-head h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 14px;
 }
 
 .input-entry-label {
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
   font-weight: 700;
+}
+
+.input-entry-note {
+  margin-bottom: 0;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .input-entry-divider {
@@ -351,14 +357,14 @@ h2 {
 }
 
 .input-entry-divider span {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   background: rgba(8, 76, 97, 0.08);
   color: var(--accent);
   display: grid;
   place-items: center;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -366,10 +372,50 @@ h2 {
   align-items: center;
 }
 
-.sample-hub {
+.sample-dropdown {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
+  gap: 6px;
+}
+
+.sample-dropdown[open] .sample-dropdown-trigger {
+  border-color: rgba(8, 76, 97, 0.22);
+  background: rgba(8, 76, 97, 0.06);
+}
+
+.sample-dropdown-trigger {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(8, 76, 97, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  color: #244050;
+}
+
+.sample-dropdown-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.sample-dropdown-trigger span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sample-dropdown-trigger small {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.sample-dropdown-list {
+  display: grid;
+  gap: 6px;
+  max-height: 176px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .overview-preview-grid {
@@ -392,8 +438,9 @@ h2 {
 .primary-button {
   background: linear-gradient(135deg, var(--accent) 0%, #0f8b8d 100%);
   color: white;
-  padding: 9px 12px;
+  padding: 8px 11px;
   box-shadow: 0 14px 30px rgba(8, 76, 97, 0.24);
+  font-size: 12px;
 }
 
 .upload-button {
@@ -404,7 +451,7 @@ h2 {
 
 .upload-button-wide {
   width: auto;
-  min-height: 36px;
+  min-height: 32px;
 }
 
 .upload-button input {
@@ -430,24 +477,26 @@ h2 {
 
 .sample-card {
   text-align: left;
-  padding: 9px 10px;
+  padding: 8px 9px;
   background: rgba(255, 255, 255, 0.68);
   border: 1px solid rgba(8, 76, 97, 0.12);
   box-shadow: var(--shadow);
 }
 
 .sample-card-inline {
-  flex: 0 0 180px;
+  width: 100%;
+  flex: 0 0 auto;
   box-shadow: none;
 }
 
 .sample-card strong {
+  font-size: 12px;
   line-height: 1.25;
 }
 
 .sample-card span {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
 }
 

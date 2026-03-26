@@ -253,7 +253,7 @@ export default function App() {
                       <span className="input-entry-label">方式 A</span>
                       <h3>上传本地文件</h3>
                     </div>
-                    <p className="muted">上传自己的 PDF、Excel 或 Word 材料，直接进入解析流程。</p>
+                    <p className="muted input-entry-note">支持 PDF、Excel、Word，上传后直接进入解析流程。</p>
                     <label className="primary-button upload-button upload-button-wide">
                       选择本地文件
                       <input type="file" multiple onChange={handleUpload} />
@@ -267,15 +267,21 @@ export default function App() {
                       <span className="input-entry-label">方式 B</span>
                       <h3>使用现成 Demo</h3>
                     </div>
-                    <p className="muted">适合第一次演示，直接选择预制样例包快速进入完整流程。</p>
-                    <div className="sample-hub">
-                      {samplePackets.map((packet) => (
-                        <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
-                          <strong>{packet.label}</strong>
-                          <span>{packet.description}</span>
-                        </button>
-                      ))}
-                    </div>
+                    <p className="muted input-entry-note">适合第一次演示，直接加载预制样例包。</p>
+                    <details className="sample-dropdown">
+                      <summary className="sample-dropdown-trigger">
+                        <span>选择 Demo 样例包</span>
+                        <small>{samplePackets.length} 个可选</small>
+                      </summary>
+                      <div className="sample-dropdown-list">
+                        {samplePackets.map((packet) => (
+                          <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
+                            <strong>{packet.label}</strong>
+                            <span>{packet.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
                   </div>
                 </div>
 
