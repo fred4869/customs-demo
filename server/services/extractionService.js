@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PDFParse } from 'pdf-parse'
 import XLSX from 'xlsx'
 import { enrichWithDashScope } from '../lib/dashscope.js'
@@ -25,6 +26,8 @@ const DOC_TYPES = {
 }
 
 const COUNTRY_WORDS = ['france', 'china', 'usa', 'united states', 'germany', 'japan', 'czech']
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const sampleAssetRoot = path.join(repoRoot, 'sample-assets')
 
 export async function loadFilesFromSample(packet) {
   const files = []
@@ -42,17 +45,33 @@ export async function loadFilesFromSample(packet) {
 }
 
 export async function resolveSampleFilePath(filePath) {
+  const directCandidates = path.isAbsolute(filePath)
+    ? [filePath]
+    : [path.resolve(repoRoot, filePath), path.resolve(sampleAssetRoot, path.basename(filePath))]
+
+  for (const candidate of directCandidates) {
+    try {
+      await fs.access(candidate)
+      return candidate
+    } catch {
+      // continue
+    }
+  }
+
   try {
     await fs.access(filePath)
     return filePath
   } catch {
     const normalizedTarget = normalizePathToken(filePath)
-    const downloadsRoot = '/Users/alfred/Downloads'
+    const searchRoots = [sampleAssetRoot, '/Users/alfred/Downloads']
     const segments = filePath.split('/').filter(Boolean)
     const filename = segments.at(-1)
     const parentName = segments.at(-2)
 
-    const candidates = await walkFiles(downloadsRoot, 4)
+    let candidates = []
+    for (const root of searchRoots) {
+      candidates.push(...await walkFiles(root, 4))
+    }
     const exactNameMatch = candidates.find((candidate) => normalizePathToken(candidate) === normalizedTarget)
     if (exactNameMatch) return exactNameMatch
 
