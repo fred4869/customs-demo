@@ -17,6 +17,17 @@ const emptyState = {
   workflow: []
 }
 
+const workflowSkeleton = [
+  { title: '文件接收', status: 'pending' },
+  { title: '文档分类', status: 'pending' },
+  { title: '文档解析', status: 'pending' },
+  { title: '字段标准化', status: 'pending' },
+  { title: '字段归并决策', status: 'pending' },
+  { title: '异常确认', status: 'pending' },
+  { title: '报关单生成', status: 'pending' },
+  { title: '模拟提交', status: 'pending' }
+]
+
 export default function App() {
   const [samplePackets, setSamplePackets] = useState([])
   const [state, setState] = useState(emptyState)
@@ -28,6 +39,7 @@ export default function App() {
   const [deliveryTab, setDeliveryTab] = useState('declaration')
   const [activeSamplePacketId, setActiveSamplePacketId] = useState(null)
   const [uploadedPreviewFiles, setUploadedPreviewFiles] = useState([])
+  const [activeWorkflowIndex, setActiveWorkflowIndex] = useState(0)
 
   useEffect(() => {
     fetchSamplePackets().then(setSamplePackets).catch((err) => setError(err.message))
@@ -37,8 +49,14 @@ export default function App() {
     uploadedPreviewFiles.forEach((item) => URL.revokeObjectURL(item.url))
   }, [uploadedPreviewFiles])
 
+  useEffect(() => {
+    setActiveWorkflowIndex(0)
+  }, [state.workflow])
+
   const openIssues = state.normalized_record?.open_issues || []
   const selectedDocument = state.documents.find((document) => document.file_id === selectedDocumentId) || state.documents[0] || null
+  const workflowItems = state.workflow.length ? state.workflow : workflowSkeleton
+
   const previewSource = useMemo(() => {
     if (!selectedDocument) return null
 
@@ -71,6 +89,7 @@ export default function App() {
       name: selectedDocument.file_name
     }
   }, [selectedDocument, uploadedPreviewFiles, activeSamplePacketId, samplePackets])
+
   const summaryCards = useMemo(() => {
     if (!state.normalized_record) return []
     return [
@@ -101,6 +120,7 @@ export default function App() {
       setState(payload)
       setSelectedDocumentId(payload.documents?.[0]?.file_id ?? null)
       setDeliveryTab('declaration')
+      setActivePage('overview')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -122,6 +142,7 @@ export default function App() {
       setState(payload)
       setSelectedDocumentId(payload.documents?.[0]?.file_id ?? null)
       setDeliveryTab('declaration')
+      setActivePage('overview')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -145,30 +166,64 @@ export default function App() {
     }
   }
 
+  function handleWorkflowClick(node, index) {
+    setActiveWorkflowIndex(index)
+
+    if (/报关单生成/.test(node.title)) {
+      setDeliveryTab('declaration')
+      setActivePage('declaration')
+      return
+    }
+
+    if (/模拟提交/.test(node.title)) {
+      setDeliveryTab('gateway')
+      setActivePage('declaration')
+      return
+    }
+
+    if (state.documents.length) {
+      setActivePage('review')
+    }
+  }
+
   return (
     <div className="app-shell app-shell-v2">
       <header className="page-header page-header-bar">
-        <div className="page-header-left">
-          <div className="page-header-title">
-            <h1>统一单证解析与报关单预览</h1>
+        <div className="page-header-main">
+          <div className="page-header-left">
+            <div className="page-header-title">
+              <h1>统一单证解析与报关单预览</h1>
+            </div>
           </div>
-          <nav className="page-nav page-nav-inline">
-            <button className={`page-nav-item ${activePage === 'overview' ? 'page-nav-item-active' : ''}`} onClick={() => setActivePage('overview')}>
-              首页进度
+          <nav className="page-step-nav" aria-label="页面步骤">
+            <button className={`page-step-item ${activePage === 'overview' ? 'page-step-item-active' : ''}`} onClick={() => setActivePage('overview')}>
+              <span className="page-step-index">01</span>
+              <span className="page-step-copy">
+                <strong>首页进度</strong>
+                <small>输入材料与流程概览</small>
+              </span>
             </button>
             <button
-              className={`page-nav-item ${activePage === 'review' ? 'page-nav-item-active' : ''}`}
+              className={`page-step-item ${activePage === 'review' ? 'page-step-item-active' : ''}`}
               onClick={() => setActivePage('review')}
               disabled={!state.documents.length}
             >
-              文件预览与确认
+              <span className="page-step-index">02</span>
+              <span className="page-step-copy">
+                <strong>文件预览与确认</strong>
+                <small>查看文件并处理待确认字段</small>
+              </span>
             </button>
             <button
-              className={`page-nav-item ${activePage === 'declaration' ? 'page-nav-item-active' : ''}`}
+              className={`page-step-item ${activePage === 'declaration' ? 'page-step-item-active' : ''}`}
               onClick={() => setActivePage('declaration')}
               disabled={!state.declaration_draft}
             >
-              报关单预览
+              <span className="page-step-index">03</span>
+              <span className="page-step-copy">
+                <strong>报关单预览</strong>
+                <small>查看统一报关单与模拟提交</small>
+              </span>
             </button>
           </nav>
         </div>
@@ -181,116 +236,144 @@ export default function App() {
       {error && <div className="error-banner">{error}</div>}
 
       <main className="page-stack">
-        <div className="workspace-shell">
-          <section className="workspace-main panel">
-            {activePage === 'overview' && (
-              <section className="section-block">
-                <div className="section-heading">
-                  <div>
-                    <p className="section-index">01</p>
-                    <h2>概览</h2>
-                  </div>
+        <section className="workspace-main panel workspace-main-single">
+          {activePage === 'overview' && (
+            <section className="section-block">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">01</p>
+                  <h2>材料输入与流程进度</h2>
                 </div>
-                {state.documents.length ? (
-                  <div className="overview-main">
-                    <div className="panel-header">
-                      <h3>Agent 工作流</h3>
-                      <span>{state.workflow.length} 个节点</span>
-                    </div>
-                    <WorkflowPanel workflow={state.workflow} showHeader={false} />
-                  </div>
-                ) : (
-                  <EmptyState title="等待输入" message="右侧上传文件或加载样例包后，这里展示工作流节点和执行进度。" />
-                )}
-              </section>
-            )}
-
-            {activePage === 'review' && (
-              <section className="section-block">
-                <div className="section-heading">
-                  <div>
-                    <p className="section-index">02</p>
-                    <h2>文件预览与字段确认</h2>
-                  </div>
-                </div>
-                {state.documents.length ? (
-                  <div className="review-layout">
-                    <div className="review-preview-column">
-                      <DocumentList documents={state.documents} selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} />
-                      <DocumentPreviewPane document={selectedDocument} previewSource={previewSource} />
-                      <DocumentEvidence document={selectedDocument} compact />
-                    </div>
-                    <div className="review-issues-column">
-                      <IssueResolver issues={openIssues} onSubmit={handleResolve} busy={resolving} />
-                    </div>
-                  </div>
-                ) : (
-                  <EmptyState title="文件预览与确认" message="上传文件后，这里显示原始预览、抽取依据和待确认字段。" />
-                )}
-              </section>
-            )}
-
-            {activePage === 'declaration' && (
-              <section className="section-block">
-                <div className="section-heading">
-                  <div>
-                    <p className="section-index">03</p>
-                    <h2>统一报关单预览</h2>
-                  </div>
-                </div>
-                <div className="subpage-tabs">
-                  <button className={`subpage-tab ${deliveryTab === 'declaration' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('declaration')}>
-                    统一报关单
-                  </button>
-                  <button className={`subpage-tab ${deliveryTab === 'gateway' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('gateway')}>
-                    模拟报关宝
-                  </button>
-                </div>
-                <div className="declaration-stack">
-                  {deliveryTab === 'declaration'
-                    ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="统一报关单" message="完成解析后，这里会生成统一报关单结构。" />)
-                    : (state.submission_preview ? <SubmissionPreview preview={state.submission_preview} /> : <EmptyState title="模拟提交" message="生成报关单后，这里展示模拟关务宝提交效果。" />)}
-                </div>
-              </section>
-            )}
-          </section>
-
-          <aside className="workspace-side panel">
-            <section className="side-section">
-              <div className="panel-header">
-                <h3>文件输入</h3>
-                <span>{state.documents.length || 0} 份</span>
               </div>
-              <label className="primary-button upload-button upload-button-wide">
-                上传本地文件
-                <input type="file" multiple onChange={handleUpload} />
-              </label>
-              <div className="sample-strip sample-strip-inline">
-                {samplePackets.map((packet) => (
-                  <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
-                    <strong>{packet.label}</strong>
-                    <span>{packet.description}</span>
-                  </button>
-                ))}
+
+              <div className="overview-input-panel">
+                <div className="input-entry-shell">
+                  <div className="input-entry input-entry-upload">
+                    <div className="input-entry-head">
+                      <span className="input-entry-label">方式 A</span>
+                      <h3>上传本地文件</h3>
+                    </div>
+                    <p className="muted">上传自己的 PDF、Excel 或 Word 材料，直接进入解析流程。</p>
+                    <label className="primary-button upload-button upload-button-wide">
+                      选择本地文件
+                      <input type="file" multiple onChange={handleUpload} />
+                    </label>
+                  </div>
+                  <div className="input-entry-divider">
+                    <span>或</span>
+                  </div>
+                  <div className="input-entry input-entry-sample">
+                    <div className="input-entry-head">
+                      <span className="input-entry-label">方式 B</span>
+                      <h3>使用现成 Demo</h3>
+                    </div>
+                    <p className="muted">适合第一次演示，直接选择预制样例包快速进入完整流程。</p>
+                    <div className="sample-hub">
+                      {samplePackets.map((packet) => (
+                        <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
+                          <strong>{packet.label}</strong>
+                          <span>{packet.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="summary-inline summary-inline-overview">
+                  {(summaryCards.length > 0 ? summaryCards : [{ label: '当前状态', value: '等待输入' }]).map((card) => (
+                    <article className="summary-chip" key={card.label}>
+                      <label>{card.label}</label>
+                      <strong>{card.value}</strong>
+                    </article>
+                  ))}
+                </div>
+              </div>
+
+              {state.documents.length ? (
+                <div className="workflow-stage">
+                  <div className="panel-header">
+                    <h3>Agent 工作流</h3>
+                    <span>{workflowItems.length} 个节点</span>
+                  </div>
+                  <WorkflowPanel
+                    workflow={workflowItems}
+                    showHeader={false}
+                    activeIndex={activeWorkflowIndex}
+                    onNodeClick={handleWorkflowClick}
+                  />
+                </div>
+              ) : (
+                <div className="workflow-stage">
+                  <div className="panel-header">
+                    <h3>Agent 工作流</h3>
+                    <span>{workflowItems.length} 个节点</span>
+                  </div>
+                  <WorkflowPanel
+                    workflow={workflowItems}
+                    showHeader={false}
+                    activeIndex={-1}
+                  />
+                  <p className="muted">先上传文件或加载样例包，流程会从“文件接收”开始推进。</p>
+                </div>
+              )}
+            </section>
+          )}
+
+          {activePage === 'review' && (
+            <section className="section-block">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">02</p>
+                  <h2>文件预览与字段确认</h2>
+                </div>
+              </div>
+              {state.documents.length ? (
+                <div className="review-layout">
+                  <div className="review-preview-column">
+                    <div className="review-file-workbench">
+                      <div className="review-file-rail">
+                        <DocumentList documents={state.documents} selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} compact />
+                      </div>
+                      <div className="review-preview-pane">
+                        <DocumentPreviewPane document={selectedDocument} previewSource={previewSource} />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="review-issues-column">
+                    <IssueResolver issues={openIssues} onSubmit={handleResolve} busy={resolving} />
+                    <DocumentEvidence document={selectedDocument} compact />
+                  </div>
+                </div>
+              ) : (
+                <EmptyState title="文件预览与确认" message="上传文件后，这里显示原始预览、抽取依据和待确认字段。" />
+              )}
+            </section>
+          )}
+
+          {activePage === 'declaration' && (
+            <section className="section-block">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">03</p>
+                  <h2>统一报关单预览</h2>
+                </div>
+              </div>
+              <div className="subpage-tabs">
+                <button className={`subpage-tab ${deliveryTab === 'declaration' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('declaration')}>
+                  统一报关单
+                </button>
+                <button className={`subpage-tab ${deliveryTab === 'gateway' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('gateway')}>
+                  模拟报关宝
+                </button>
+              </div>
+              <div className="declaration-stack">
+                {deliveryTab === 'declaration'
+                  ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="统一报关单" message="完成解析后，这里会生成统一报关单结构。" />)
+                  : (state.submission_preview ? <SubmissionPreview preview={state.submission_preview} /> : <EmptyState title="模拟提交" message="生成报关单后，这里展示模拟关务宝提交效果。" />)}
               </div>
             </section>
-
-            <section className="side-section">
-              <div className="panel-header">
-                <h3>概览状态</h3>
-                <span>{summaryCards.length ? '已生成' : '空态'}</span>
-              </div>
-              <div className="summary-inline">
-                {(summaryCards.length > 0 ? summaryCards : [{ label: '当前状态', value: '等待输入' }]).map((card) => (
-                  <article className="summary-chip" key={card.label}>
-                    <label>{card.label}</label>
-                    <strong>{card.value}</strong>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </aside>
-        </div>
+          )}
+        </section>
       </main>
 
       {(loading || resolving) && <div className="loading-mask">{loading ? '正在解析单据...' : '正在应用人工确认...'}</div>}
@@ -322,4 +405,11 @@ function mimeFromName(filename = '') {
 
 function normalizeFileToken(value = '') {
   return String(value).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function toWorkflowStatusLabel(value) {
+  if (value === 'completed') return '已完成'
+  if (value === 'needs_confirm') return '待确认'
+  if (value === 'failed') return '失败'
+  return '处理中'
 }

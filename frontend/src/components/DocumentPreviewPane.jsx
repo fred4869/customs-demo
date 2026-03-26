@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import mammoth from 'mammoth'
 import { displayFilename } from '../lib/filenames'
+import { detectPreviewType, previewTypeLabel } from '../lib/preview'
+
+const EXCEL_MAX_ROWS = 80
+const EXCEL_MAX_COLS = 14
 
 export default function DocumentPreviewPane({ document, previewSource }) {
   const [loading, setLoading] = useState(false)
@@ -10,7 +14,12 @@ export default function DocumentPreviewPane({ document, previewSource }) {
   const [sheets, setSheets] = useState([])
   const [activeSheet, setActiveSheet] = useState('')
 
-  const fileType = useMemo(() => detectFileType(document?.file_name, previewSource?.mime), [document?.file_name, previewSource?.mime])
+  const fileType = useMemo(
+    () => detectPreviewType(document?.file_name, previewSource?.mime, previewSource?.name),
+    [document?.file_name, previewSource?.mime, previewSource?.name]
+  )
+  const activeSheetData = sheets.find((sheet) => sheet.name === activeSheet)
+  const previewKey = `${fileType}:${previewSource?.url || previewSource?.name || document?.file_name || 'empty'}`
 
   useEffect(() => {
     let cancelled = false
@@ -32,7 +41,9 @@ export default function DocumentPreviewPane({ document, previewSource }) {
           const workbook = XLSX.read(buffer, { type: 'array' })
           const nextSheets = workbook.SheetNames.map((name) => ({
             name,
-            html: XLSX.utils.sheet_to_html(workbook.Sheets[name], { editable: false })
+            rows: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' })
+              .slice(0, EXCEL_MAX_ROWS)
+              .map((row) => row.slice(0, EXCEL_MAX_COLS).map((cell) => formatCell(cell)))
           }))
           setSheets(nextSheets)
           setActiveSheet(nextSheets[0]?.name || '')
@@ -71,28 +82,37 @@ export default function DocumentPreviewPane({ document, previewSource }) {
     )
   }
 
-  const activeSheetHtml = sheets.find((sheet) => sheet.name === activeSheet)?.html
-
   return (
     <section className="panel preview-panel">
       <div className="panel-header">
         <h3>原始文件预览</h3>
-        <span>{labelForType(fileType)}</span>
+        <span>{previewTypeLabel(fileType)}</span>
       </div>
 
       <div className="preview-file-name">{displayFilename(document.file_name)}</div>
 
       {fileType === 'pdf' && previewSource?.url && (
-        <object className="file-frame" data={previewSource.url} type="application/pdf" aria-label={displayFilename(document.file_name)}>
-          <iframe className="file-frame" src={previewSource.url} title={displayFilename(document.file_name)} />
-        </object>
+        <div className="pdf-preview-shell">
+          <div className="pdf-preview-toolbar">
+            <span>当前文件使用浏览器 PDF 预览器</span>
+            <a href={previewSource.url} target="_blank" rel="noreferrer">
+              新窗口打开
+            </a>
+          </div>
+          <iframe
+            key={previewKey}
+            className="file-frame"
+            src={previewSource.url}
+            title={displayFilename(document.file_name)}
+          />
+        </div>
       )}
 
       {fileType === 'excel' && (
         <>
           {loading && <p className="muted">正在生成 Excel 预览...</p>}
           {sheets.length > 0 && (
-            <>
+            <div className="excel-viewer-shell">
               <div className="sheet-tabs">
                 {sheets.map((sheet) => (
                   <button
@@ -104,8 +124,12 @@ export default function DocumentPreviewPane({ document, previewSource }) {
                   </button>
                 ))}
               </div>
-              <div className="excel-preview" dangerouslySetInnerHTML={{ __html: activeSheetHtml }} />
-            </>
+              <div className="excel-meta">
+                <span>展示前 {activeSheetData?.rows?.length || 0} 行</span>
+                <span>最多 {EXCEL_MAX_COLS} 列</span>
+              </div>
+              <ExcelPreviewTable rows={activeSheetData?.rows || []} />
+            </div>
           )}
         </>
       )}
@@ -130,6 +154,45 @@ export default function DocumentPreviewPane({ document, previewSource }) {
   )
 }
 
+function ExcelPreviewTable({ rows }) {
+  if (!rows.length) {
+    return (
+      <div className="preview-empty-state preview-empty-state-compact">
+        <strong>当前工作表为空</strong>
+      </div>
+    )
+  }
+
+  const header = rows[0] || []
+  const bodyRows = rows.slice(1)
+
+  return (
+    <div className="excel-preview-table-wrap">
+      <table className="excel-preview-table">
+        <thead>
+          <tr>
+            <th className="excel-row-index">#</th>
+            {header.map((cell, index) => (
+              <th key={`header-${index}`} title={cell}>{cell || `列 ${index + 1}`}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {bodyRows.map((row, rowIndex) => (
+            <tr key={`row-${rowIndex}`}>
+              <td className="excel-row-index">{rowIndex + 2}</td>
+              {header.map((_, cellIndex) => {
+                const cell = row[cellIndex] || ''
+                return <td key={`cell-${rowIndex}-${cellIndex}`} title={cell}>{cell}</td>
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 async function readArrayBuffer(previewSource) {
   if (previewSource.file) return previewSource.file.arrayBuffer()
   const response = await fetch(previewSource.url)
@@ -137,17 +200,7 @@ async function readArrayBuffer(previewSource) {
   return response.arrayBuffer()
 }
 
-function detectFileType(filename = '', mime = '') {
-  const lower = String(filename).toLowerCase()
-  if (mime.includes('pdf') || lower.endsWith('.pdf')) return 'pdf'
-  if (mime.includes('sheet') || lower.endsWith('.xlsx') || lower.endsWith('.xls')) return 'excel'
-  if (mime.includes('word') || lower.endsWith('.docx') || lower.endsWith('.doc')) return 'word'
-  return 'text'
-}
-
-function labelForType(fileType) {
-  if (fileType === 'pdf') return 'PDF 文档'
-  if (fileType === 'excel') return 'Excel 表格'
-  if (fileType === 'word') return 'Word 文档'
-  return '暂不支持预览'
+function formatCell(value) {
+  if (value === null || value === undefined) return ''
+  return String(value).replace(/\s+/g, ' ').trim()
 }

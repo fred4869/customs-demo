@@ -1,17 +1,17 @@
 import { displayFilename } from '../lib/filenames'
 import { toDisplaySnippet } from '../lib/textQuality'
 
-export default function DocumentList({ documents, selectedId, onSelect }) {
+export default function DocumentList({ documents, selectedId, onSelect, compact = false }) {
   return (
     <section className="panel">
       <div className="panel-header">
         <h3>文件列表</h3>
         <span>{documents.length} 份文件</span>
       </div>
-      <div className="document-grid">
+      <div className={compact ? 'document-rail' : 'document-grid'}>
         {documents.map((document) => (
           <article
-            className={`document-card ${selectedId === document.file_id ? 'document-card-active' : ''}`}
+            className={`${compact ? 'document-rail-item' : 'document-card'} ${selectedId === document.file_id ? 'document-card-active' : ''}`}
             key={document.file_id}
             onClick={() => onSelect?.(document.file_id)}
           >
@@ -19,21 +19,29 @@ export default function DocumentList({ documents, selectedId, onSelect }) {
               <strong>{displayFilename(document.file_name)}</strong>
               <span className={`tag tag-${document.document_type}`}>{toDocumentTypeLabel(document.document_type)}</span>
             </div>
-            <p className="muted">{toDisplaySnippet(document.text_excerpt, '已加载原始文件预览，摘要内容已收起').slice(0, 120)}</p>
-            <div className="mini-block">
-              <div>
-                <label>字段候选</label>
-                <strong>{Object.keys(document.header_candidates || {}).length}</strong>
+            {compact ? (
+              <div className="document-rail-meta">
+                <span>{toDisplaySnippet(document.text_excerpt, '已加载原始文件预览').slice(0, 38)}</span>
               </div>
-              <div>
-                <label>商品行</label>
-                <strong>{document.line_items?.length || 0}</strong>
-              </div>
-              <div>
-                <label>来源</label>
-                <strong>{document.source_path ? '本地样例' : '上传'}</strong>
-              </div>
-            </div>
+            ) : (
+              <>
+                <p className="muted">{toDisplaySnippet(document.text_excerpt, '已加载原始文件预览，摘要内容已收起').slice(0, 120)}</p>
+                <div className="mini-block">
+                  <div>
+                    <label>字段候选</label>
+                    <strong>{Object.keys(document.header_candidates || {}).length}</strong>
+                  </div>
+                  <div>
+                    <label>商品行</label>
+                    <strong>{document.line_items?.length || 0}</strong>
+                  </div>
+                  <div>
+                    <label>来源</label>
+                    <strong>{document.source_path ? '本地样例' : '上传'}</strong>
+                  </div>
+                </div>
+              </>
+            )}
           </article>
         ))}
       </div>
