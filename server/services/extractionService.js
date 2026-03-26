@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDFParse } from 'pdf-parse'
 import XLSX from 'xlsx'
 import { enrichWithDashScope } from '../lib/dashscope.js'
 import {
@@ -181,6 +180,7 @@ async function readFileText(file) {
   if (extension === '.pdf') {
     let parser
     try {
+      const { PDFParse } = await import('pdf-parse')
       parser = new PDFParse({ data: file.buffer })
       const result = await parser.getText()
       if (result.text?.trim()) return result.text
