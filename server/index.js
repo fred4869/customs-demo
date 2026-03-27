@@ -5,7 +5,7 @@ import multer from 'multer'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { samplePackets } from './data/samplePackets.js'
-import { loadFilesFromSample, extractDocuments, resolveSampleFilePath } from './services/extractionService.js'
+import { loadFilesFromSample, loadFilesFromSampleWithOrigin, extractDocuments, resolveSampleFilePath } from './services/extractionService.js'
 import {
   buildDeclarationDraft,
   buildNormalizedRecord,
@@ -55,11 +55,8 @@ app.get('/api/sample-packets/:id/files/:index', async (req, res, next) => {
       return
     }
 
-    const filePath = await resolveSampleFilePath(packet.files[index])
-    const buffer = await fs.readFile(filePath)
-    res.type(getMimeFromPath(filePath))
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(path.basename(filePath))}"`)
-    res.send(buffer)
+    const staticPath = toPublicSamplePath(packet.files[index])
+    res.redirect(staticPath)
   } catch (error) {
     next(error)
   }
@@ -82,7 +79,7 @@ app.post('/api/sample-packets/:id/parse', async (req, res, next) => {
       res.status(404).json({ error: 'Sample packet not found' })
       return
     }
-    const files = await loadFilesFromSample(packet)
+    const files = await loadFilesFromSampleWithOrigin(packet, getRequestOrigin(req))
     const payload = await buildDemoPayload(files)
     const documents = (payload.documents || []).map((document, index) => ({
       ...document,
@@ -162,4 +159,18 @@ function getMimeFromPath(filePath) {
   if (extension === '.docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   if (extension === '.doc') return 'application/msword'
   return 'application/octet-stream'
+}
+
+function toPublicSamplePath(filePath = '') {
+  return `/${String(filePath)
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`
+}
+
+function getRequestOrigin(req) {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https'
+  const host = req.headers['x-forwarded-host'] || req.headers.host
+  return `${proto}://${host}`
 }

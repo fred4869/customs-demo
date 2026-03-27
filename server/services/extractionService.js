@@ -30,15 +30,18 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const sampleAssetRoot = path.join(repoRoot, 'sample-assets')
 
 export async function loadFilesFromSample(packet) {
+  return loadFilesFromSampleWithOrigin(packet)
+}
+
+export async function loadFilesFromSampleWithOrigin(packet, origin = '') {
   const files = []
   for (const filePath of packet.files) {
-    const resolvedPath = await resolveSampleFilePath(filePath)
-    const buffer = await fs.readFile(resolvedPath)
+    const { buffer, filename, mimetype, sourcePath } = await readSampleFile(filePath, origin)
     files.push({
       buffer,
-      originalname: path.basename(resolvedPath),
-      mimetype: getMimeFromPath(resolvedPath),
-      sourcePath: resolvedPath
+      originalname: filename,
+      mimetype,
+      sourcePath
     })
   }
   return files
@@ -165,6 +168,42 @@ async function walkFiles(root, maxDepth = 3, depth = 0) {
     }
   }
   return files
+}
+
+async function readSampleFile(filePath, origin = '') {
+  try {
+    const resolvedPath = await resolveSampleFilePath(filePath)
+    const buffer = await fs.readFile(resolvedPath)
+    return {
+      buffer,
+      filename: path.basename(resolvedPath),
+      mimetype: getMimeFromPath(resolvedPath),
+      sourcePath: resolvedPath
+    }
+  } catch (localError) {
+    if (!origin) throw localError
+
+    const response = await fetch(new URL(toPublicSamplePath(filePath), origin))
+    if (!response.ok) {
+      throw new Error(`Sample file not available: ${filePath}`)
+    }
+
+    const arrayBuffer = await response.arrayBuffer()
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      filename: path.basename(filePath),
+      mimetype: response.headers.get('content-type') || getMimeFromPath(filePath),
+      sourcePath: filePath
+    }
+  }
+}
+
+function toPublicSamplePath(filePath = '') {
+  return `/${String(filePath)
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`
 }
 
 async function readFileText(file) {
