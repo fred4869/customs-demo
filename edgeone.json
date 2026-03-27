@@ -1,0 +1,14 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": "frontend/dist",
+  "nodeVersion": "22.11.0",
+  "node-functions": {
+    "included_files": [
+      "sample-assets/**"
+    ]
+  },
+  "nodeFunctionsConfig": {
+    "maxDuration": 60
+  }
+}

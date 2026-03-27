@@ -21,6 +21,29 @@ normalizes them into a single customs record, and renders one declaration draft 
 - Local sample packets that read from `~/Downloads` are only available on your machine and will not work on Vercel.
 - The deployed site should use uploaded files instead of local sample packet buttons.
 
+## EdgeOne Pages
+
+This repo is prepared for EdgeOne Pages as well:
+
+- Static frontend output: `frontend/dist`
+- Node Functions entry: `node-functions/api/[[default]].js`
+- Sample files bundled for online demo: `sample-assets/**`
+
+Recommended EdgeOne setup:
+
+1. Import the GitHub repo in EdgeOne Pages.
+2. Keep the project root as `/`.
+3. Build command: `npm run build`
+4. Install command: `npm install`
+5. Output directory: `frontend/dist`
+6. Set environment variable `DASHSCOPE_API_KEY`
+
+Notes:
+
+- `/api/*` requests will be served by the Express app exported from `node-functions/api/[[default]].js`
+- Sample packet preview and parsing work online because `sample-assets/**` is included in the build artifacts via `edgeone.json`
+- This project does not rely on client-side path routing, so no SPA rewrite is needed
+
 ## Demo capabilities
 
 - Upload mixed files or load local sample packets
