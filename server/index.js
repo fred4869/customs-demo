@@ -79,7 +79,7 @@ app.post('/api/sample-packets/:id/parse', async (req, res, next) => {
       res.status(404).json({ error: 'Sample packet not found' })
       return
     }
-    const files = await loadFilesFromSampleWithOrigin(packet, getRequestOrigin(req))
+    const files = await loadFilesFromSampleWithOrigin(packet, getRequestOrigin(req), req.headers)
     const payload = await buildDemoPayload(files)
     const documents = (payload.documents || []).map((document, index) => ({
       ...document,

@@ -69,7 +69,7 @@ export async function onRequest(context) {
       const packet = samplePackets.find((item) => item.id === packetId)
       if (!packet) return json({ error: 'Sample packet not found' }, 404)
 
-      const files = await loadFilesFromSampleWithOrigin(packet, url.origin)
+      const files = await loadFilesFromSampleWithOrigin(packet, url.origin, headersToObject(request.headers))
       const payload = await buildDemoPayload(files)
       const documents = (payload.documents || []).map((document, index) => ({
         ...document,
@@ -162,4 +162,12 @@ function getMimeFromName(filename = '') {
   if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   if (lower.endsWith('.doc')) return 'application/msword'
   return 'application/octet-stream'
+}
+
+function headersToObject(headers) {
+  const result = {}
+  for (const [key, value] of headers.entries()) {
+    result[key] = value
+  }
+  return result
 }

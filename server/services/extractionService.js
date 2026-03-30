@@ -33,10 +33,10 @@ export async function loadFilesFromSample(packet) {
   return loadFilesFromSampleWithOrigin(packet)
 }
 
-export async function loadFilesFromSampleWithOrigin(packet, origin = '') {
+export async function loadFilesFromSampleWithOrigin(packet, origin = '', requestHeaders = {}) {
   const files = []
   for (const filePath of packet.files) {
-    const { buffer, filename, mimetype, sourcePath } = await readSampleFile(filePath, origin)
+    const { buffer, filename, mimetype, sourcePath } = await readSampleFile(filePath, origin, requestHeaders)
     files.push({
       buffer,
       originalname: filename,
@@ -170,7 +170,7 @@ async function walkFiles(root, maxDepth = 3, depth = 0) {
   return files
 }
 
-async function readSampleFile(filePath, origin = '') {
+async function readSampleFile(filePath, origin = '', requestHeaders = {}) {
   try {
     const resolvedPath = await resolveSampleFilePath(filePath)
     const buffer = await fs.readFile(resolvedPath)
@@ -183,7 +183,15 @@ async function readSampleFile(filePath, origin = '') {
   } catch (localError) {
     if (!origin) throw localError
 
-    const response = await fetch(new URL(toPublicSamplePath(filePath), origin))
+    const forwardedHeaders = {}
+    const cookie = requestHeaders.cookie || requestHeaders.Cookie
+    const userAgent = requestHeaders['user-agent'] || requestHeaders['User-Agent']
+    if (cookie) forwardedHeaders.cookie = cookie
+    if (userAgent) forwardedHeaders['user-agent'] = userAgent
+
+    const response = await fetch(new URL(toPublicSamplePath(filePath), origin), {
+      headers: forwardedHeaders
+    })
     if (!response.ok) {
       throw new Error(`Sample file not available: ${filePath}`)
     }
