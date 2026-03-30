@@ -2,10 +2,10 @@ import dotenv from 'dotenv'
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import fs from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { samplePackets } from './data/samplePackets.js'
-import { loadFilesFromSample, loadFilesFromSampleWithOrigin, extractDocuments, resolveSampleFilePath } from './services/extractionService.js'
+import { loadFilesFromSampleWithOrigin, extractDocuments } from './services/extractionService.js'
 import {
   buildDeclarationDraft,
   buildNormalizedRecord,
@@ -18,6 +18,9 @@ dotenv.config({ path: new URL('../.env', import.meta.url) })
 const app = express()
 const upload = multer({ storage: multer.memoryStorage() })
 const port = Number(process.env.PORT || 8787)
+const serverDir = path.dirname(fileURLToPath(import.meta.url))
+const frontendDistDir = path.resolve(serverDir, '../frontend/dist')
+const frontendIndexFile = path.join(frontendDistDir, 'index.html')
 
 const dashscopeConfig = {
   apiKey: process.env.DASHSCOPE_API_KEY || '',
@@ -117,6 +120,12 @@ app.post('/api/resolve', async (req, res, next) => {
   } catch (error) {
     next(error)
   }
+})
+
+app.use(express.static(frontendDistDir, { index: false }))
+
+app.get(/^\/(?!api(?:\/|$)).*/, (_req, res) => {
+  res.sendFile(frontendIndexFile)
 })
 
 app.use((error, _req, res, _next) => {
