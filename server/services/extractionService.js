@@ -520,6 +520,14 @@ function parseLooseNumber(value) {
 }
 
 function extractLineItems(documentType, lines, filename) {
+  if (documentType === DOC_TYPES.reference) {
+    const declarationItems = extractReferenceDeclarationItems(lines)
+    if (declarationItems.length) return declarationItems
+
+    const tradeItems = extractReferenceTradeItems(lines)
+    if (tradeItems.length) return tradeItems
+  }
+
   if (documentType === DOC_TYPES.manifest || /\.xlsx?$/i.test(filename)) {
     const rows = lines
       .filter((line) => /\|/.test(line))
@@ -638,24 +646,116 @@ function extractLineItems(documentType, lines, filename) {
     }]
   }
 
-  if (documentType === DOC_TYPES.reference) {
-    return [{
-      line_no: 1,
-      product_code: 'REFERENCE-GOODS',
-      product_name_cn: '参考申报商品',
-      product_name_en: 'REFERENCE GOODS',
-      spec_model: null,
+  return []
+}
+
+function extractReferenceDeclarationItems(lines) {
+  const items = []
+  for (const rawLine of lines) {
+    const line = normalizeWhitespace(rawLine)
+    if (!/^\d{10}\s+/.test(line)) continue
+    if (!/(USD|CNY|EUR)\b/i.test(line)) continue
+
+    const matched = line.match(
+      /^(\d{10})\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(台|卷|千克|公斤|KG|KGS|PCS|SET|SETS)\s+([^\s]+)\s+([^\s]+)\s+(?:US\$|\$)?([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+([A-Z]{3})$/i
+    )
+    if (!matched) continue
+
+    const [, hsCode, productNameRaw, qtyRaw, unitRaw, destinationRaw, originRaw, unitPriceRaw, lineAmountRaw] = matched
+    const productName = normalizeWhitespace(productNameRaw)
+
+    items.push({
+      line_no: items.length + 1,
+      product_code: hsCode,
+      product_name_cn: containsChinese(productName) ? productName : null,
+      product_name_en: !containsChinese(productName) ? productName : null,
+      spec_model: productName,
+      hs_code: hsCode,
+      declared_qty: parseNumber(qtyRaw),
+      declared_unit: normalizeUnit(unitRaw),
+      unit_price: parseLooseNumber(unitPriceRaw),
+      line_amount: parseLooseNumber(lineAmountRaw),
+      origin_country: maybeCountry(originRaw),
+      destination_country: maybeCountry(destinationRaw),
+      source_documents: []
+    })
+  }
+  return items
+}
+
+function extractReferenceTradeItems(lines) {
+  const items = []
+  const startIndex = lines.findIndex((line) => /item\s+products\s+specification\s+quantity\s+unit price\s+total price/i.test(line))
+  if (startIndex < 0) return items
+
+  const stopPatterns = [
+    /^total\b/i,
+    /^note:/i,
+    /^packing list$/i,
+    /^contract$/i,
+    /^中华人民共和国海关出口货物报关单/i
+  ]
+
+  let index = startIndex + 1
+  while (index < lines.length) {
+    const line = normalizeWhitespace(lines[index])
+    if (!line) {
+      index += 1
+      continue
+    }
+    if (stopPatterns.some((pattern) => pattern.test(line))) break
+
+    const itemHeader = line.match(/^(\d+)\s+(.+)$/)
+    if (!itemHeader) {
+      index += 1
+      continue
+    }
+
+    const [, itemNo, productHead] = itemHeader
+    const detailLines = []
+    index += 1
+
+    while (index < lines.length) {
+      const detailLine = normalizeWhitespace(lines[index])
+      if (!detailLine) {
+        index += 1
+        continue
+      }
+      if (stopPatterns.some((pattern) => pattern.test(detailLine))) break
+      if (/^\d+\s+/.test(detailLine)) break
+      detailLines.push(detailLine)
+      index += 1
+    }
+
+    const qtyLineIndex = detailLines.findIndex((detail) => /\b(US\$|\$)\s*[\d,]+(?:\.\d+)?\s+(US\$|\$)\s*[\d,]+(?:\.\d+)?/i.test(detail))
+    if (qtyLineIndex === -1) continue
+
+    const specLines = detailLines.slice(0, qtyLineIndex)
+    const qtyLine = detailLines[qtyLineIndex]
+    const matched = qtyLine.match(/^(\d+(?:\.\d+)?)\s+([A-Za-z]+)\s+(?:US\$|\$)\s*([\d,]+(?:\.\d+)?)\s+(?:US\$|\$)\s*([\d,]+(?:\.\d+)?)$/i)
+    if (!matched) continue
+
+    const [, qtyRaw, unitRaw, unitPriceRaw, lineAmountRaw] = matched
+    const productName = normalizeWhitespace(productHead)
+    const specModel = normalizeWhitespace(specLines.join(' | ')) || productName
+
+    items.push({
+      line_no: Number(itemNo) || items.length + 1,
+      product_code: null,
+      product_name_cn: containsChinese(productName) ? productName : null,
+      product_name_en: !containsChinese(productName) ? productName : null,
+      spec_model: specModel,
       hs_code: null,
-      declared_qty: null,
-      declared_unit: 'PCS',
-      unit_price: null,
-      line_amount: null,
+      declared_qty: parseNumber(qtyRaw),
+      declared_unit: normalizeUnit(unitRaw),
+      unit_price: parseLooseNumber(unitPriceRaw),
+      line_amount: parseLooseNumber(lineAmountRaw),
       origin_country: null,
       source_documents: []
-    }]
+    })
   }
 
-  return []
+  return items
 }
 
 function mergeSupplement(extraction, llmSupplement, sourcePath) {
