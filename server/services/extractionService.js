@@ -28,6 +28,8 @@ const DOC_TYPES = {
 const COUNTRY_WORDS = ['france', 'china', 'usa', 'united states', 'germany', 'japan', 'czech']
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const sampleAssetRoot = path.join(repoRoot, 'sample-assets')
+const frontendPublicSampleRoot = path.join(repoRoot, 'frontend', 'public', 'sample-assets')
+const frontendDistSampleRoot = path.join(repoRoot, 'frontend', 'dist', 'sample-assets')
 
 export async function loadFilesFromSample(packet) {
   return loadFilesFromSampleWithOrigin(packet)
@@ -50,7 +52,12 @@ export async function loadFilesFromSampleWithOrigin(packet, origin = '', request
 export async function resolveSampleFilePath(filePath) {
   const directCandidates = path.isAbsolute(filePath)
     ? [filePath]
-    : [path.resolve(repoRoot, filePath), path.resolve(sampleAssetRoot, path.basename(filePath))]
+    : [
+        path.resolve(repoRoot, filePath),
+        path.resolve(sampleAssetRoot, path.basename(filePath)),
+        path.resolve(frontendPublicSampleRoot, filePath.replace(/^sample-assets\//, '')),
+        path.resolve(frontendDistSampleRoot, filePath.replace(/^sample-assets\//, ''))
+      ]
 
   for (const candidate of directCandidates) {
     try {
@@ -66,7 +73,7 @@ export async function resolveSampleFilePath(filePath) {
     return filePath
   } catch {
     const normalizedTarget = normalizePathToken(filePath)
-    const searchRoots = [sampleAssetRoot, '/Users/alfred/Downloads']
+    const searchRoots = [sampleAssetRoot, frontendPublicSampleRoot, frontendDistSampleRoot, '/Users/alfred/Downloads']
     const segments = filePath.split('/').filter(Boolean)
     const filename = segments.at(-1)
     const parentName = segments.at(-2)
@@ -186,10 +193,18 @@ async function readSampleFile(filePath, origin = '', requestHeaders = {}) {
     const forwardedHeaders = {}
     const cookie = requestHeaders.cookie || requestHeaders.Cookie
     const userAgent = requestHeaders['user-agent'] || requestHeaders['User-Agent']
+    const referer = requestHeaders.referer || requestHeaders.Referer
     if (cookie) forwardedHeaders.cookie = cookie
     if (userAgent) forwardedHeaders['user-agent'] = userAgent
+    if (referer) forwardedHeaders.referer = referer
 
-    const response = await fetch(new URL(toPublicSamplePath(filePath), origin), {
+    const targetUrl = new URL(toPublicSamplePath(filePath), origin)
+    const previewSearch = extractPreviewSearch(origin, requestHeaders)
+    if (previewSearch) {
+      targetUrl.search = previewSearch
+    }
+
+    const response = await fetch(targetUrl, {
       headers: forwardedHeaders
     })
     if (!response.ok) {
@@ -212,6 +227,21 @@ function toPublicSamplePath(filePath = '') {
     .filter(Boolean)
     .map((segment) => encodeURIComponent(segment))
     .join('/')}`
+}
+
+function extractPreviewSearch(origin = '', requestHeaders = {}) {
+  const referer = requestHeaders.referer || requestHeaders.Referer
+  if (!referer) return ''
+
+  try {
+    const refererUrl = new URL(referer, origin || undefined)
+    const token = refererUrl.searchParams.get('eo_token')
+    const time = refererUrl.searchParams.get('eo_time')
+    if (!token || !time) return ''
+    return `?eo_token=${encodeURIComponent(token)}&eo_time=${encodeURIComponent(time)}`
+  } catch {
+    return ''
+  }
 }
 
 async function readFileText(file) {
