@@ -1,442 +1,421 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchKnowledgeSources, streamSecurityCheck } from './lib/api'
+import DeclarationView from './components/DeclarationView'
+import DocumentEvidence from './components/DocumentEvidence'
+import DocumentList from './components/DocumentList'
+import DocumentPreviewPane from './components/DocumentPreviewPane'
+import IssueResolver from './components/IssueResolver'
+import SubmissionPreview from './components/SubmissionPreview'
+import WorkflowPanel from './components/WorkflowPanel'
+import { fetchSamplePackets, getSampleFileUrl, parseSamplePacket, parseUploadedFiles, resolveIssues } from './lib/api'
 
-const samplePrompts = [
-  {
-    id: 'prompt-1',
-    label: '有限空间警示标志',
-    text: '污水处理池入口处未设置明显有限空间安全警示标志。'
-  },
-  {
-    id: 'prompt-2',
-    label: '风险告知牌',
-    text: '废水处理区域多个有限空间集中布置，但现场未设置安全风险告知牌。'
-  },
-  {
-    id: 'prompt-3',
-    label: '高压容器标志',
-    text: '储气罐现场未设置“注意高压容器”安全标志。'
-  },
-  {
-    id: 'prompt-4',
-    label: '防火防爆措施',
-    text: '使用易燃加工原料的增材制造机床，未采取惰性气体保护或其他防止材料燃烧的措施。'
-  },
-  {
-    id: 'prompt-5',
-    label: '未命中示例',
-    text: '污水处理区域一洗眼器未进行操作检查与维护。'
-  }
-]
-
-const emptyResult = {
-  status: 'idle',
-  query: '',
-  rows: [],
-  answer_text: '',
-  message: '',
-  transport: null
+const emptyState = {
+  packet_id: null,
+  documents: [],
+  normalized_record: null,
+  declaration_draft: null,
+  submission_preview: { warnings: [], form_data: {} },
+  workflow: []
 }
 
+const workflowSkeleton = [
+  { title: '文件接收', status: 'pending' },
+  { title: '文档分类', status: 'pending' },
+  { title: '文档解析', status: 'pending' },
+  { title: '字段标准化', status: 'pending' },
+  { title: '字段归并决策', status: 'pending' },
+  { title: '异常确认', status: 'pending' },
+  { title: '报关单生成', status: 'pending' },
+  { title: '模拟提交', status: 'pending' }
+]
+
 export default function App() {
-  const [sources, setSources] = useState([])
-  const [query, setQuery] = useState('')
-  const [result, setResult] = useState(emptyResult)
+  const [samplePackets, setSamplePackets] = useState([])
+  const [state, setState] = useState(emptyState)
   const [loading, setLoading] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const [error, setError] = useState('')
-  const [liveEvents, setLiveEvents] = useState([])
+  const [selectedDocumentId, setSelectedDocumentId] = useState(null)
+  const [activePage, setActivePage] = useState('overview')
+  const [deliveryTab, setDeliveryTab] = useState('declaration')
+  const [activeSamplePacketId, setActiveSamplePacketId] = useState(null)
+  const [uploadedPreviewFiles, setUploadedPreviewFiles] = useState([])
+  const [activeWorkflowIndex, setActiveWorkflowIndex] = useState(0)
 
   useEffect(() => {
-    fetchKnowledgeSources()
-      .then((payload) => setSources(payload.sources || []))
-      .catch((err) => setError(err.message))
+    fetchSamplePackets().then(setSamplePackets).catch((err) => setError(err.message))
   }, [])
 
-  const stats = useMemo(
-    () => [
-      { label: '知识来源', value: sources.length || '--' },
-      { label: '当前命中', value: result.rows.length || 0 },
-      { label: '输出模式', value: '表格渲染' }
-    ],
-    [result.rows.length, sources.length]
-  )
+  useEffect(() => () => {
+    uploadedPreviewFiles.forEach((item) => URL.revokeObjectURL(item.url))
+  }, [uploadedPreviewFiles])
 
-  const progressState = useMemo(() => buildProgressState(liveEvents, loading, result), [liveEvents, loading, result])
+  useEffect(() => {
+    setActiveWorkflowIndex(0)
+  }, [state.workflow])
 
-  async function submitSearch(nextQuery) {
-    const value = String(nextQuery ?? query).trim()
-    if (!value) return
+  const openIssues = state.normalized_record?.open_issues || []
+  const selectedDocument = state.documents.find((document) => document.file_id === selectedDocumentId) || state.documents[0] || null
+  const workflowItems = state.workflow.length ? state.workflow : workflowSkeleton
 
+  const previewSource = useMemo(() => {
+    if (!selectedDocument) return null
+
+    if (Number.isInteger(selectedDocument.source_index) && uploadedPreviewFiles[selectedDocument.source_index]) {
+      return uploadedPreviewFiles[selectedDocument.source_index]
+    }
+
+    const uploaded = uploadedPreviewFiles.find((item) => normalizeFileToken(item.name) === normalizeFileToken(selectedDocument.file_name))
+    if (uploaded) return uploaded
+
+    if (selectedDocument.preview_url) {
+      return {
+        url: selectedDocument.preview_url,
+        mime: mimeFromName(selectedDocument.file_name),
+        name: selectedDocument.file_name
+      }
+    }
+
+    if (!activeSamplePacketId) return null
+    const packet = samplePackets.find((item) => item.id === activeSamplePacketId)
+    if (!packet) return null
+    const fileIndex = (packet.files || []).findIndex((file) => {
+      const path = file.path || ''
+      return normalizeFileToken(path.split('/').pop()) === normalizeFileToken(selectedDocument.file_name)
+    })
+    if (fileIndex < 0) return null
+    return {
+      url: getSampleFileUrl(activeSamplePacketId, fileIndex),
+      mime: mimeFromName(selectedDocument.file_name),
+      name: selectedDocument.file_name
+    }
+  }, [selectedDocument, uploadedPreviewFiles, activeSamplePacketId, samplePackets])
+
+  const summaryCards = useMemo(() => {
+    if (!state.normalized_record) return []
+    return [
+      { label: '文件数', value: state.documents.length },
+      { label: '商品行', value: state.declaration_draft?.items?.length || 0 },
+      { label: '待确认字段', value: openIssues.length },
+      { label: '已完成节点', value: state.workflow.filter((node) => node.status === 'completed').length }
+    ]
+  }, [state, openIssues.length])
+
+  async function handleUpload(event) {
+    const files = Array.from(event.target.files || [])
+    if (!files.length) return
+    setUploadedPreviewFiles((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.url))
+      return files.map((file) => ({
+        name: file.name,
+        url: URL.createObjectURL(file),
+        mime: file.type || mimeFromName(file.name),
+        file
+      }))
+    })
+    setActiveSamplePacketId(null)
     setLoading(true)
     setError('')
-    setLiveEvents([])
-    setResult({
-      status: 'pending',
-      query: value,
-      rows: [],
-      answer_text: '',
-      message: '正在检索，请稍候。',
-      transport: null
-    })
-
     try {
-      await streamSecurityCheck(value, {
-        onMessage(payload) {
-          setLiveEvents((current) => {
-            const next = [...current, normalizeLiveEvent(payload)]
-            return next.slice(-8)
-          })
-        },
-        onFinal(payload) {
-          setResult(payload)
-        }
-      })
-      setQuery(value)
+      const payload = await parseUploadedFiles(files)
+      setState(payload)
+      setSelectedDocumentId(payload.documents?.[0]?.file_id ?? null)
+      setDeliveryTab('declaration')
+      setActivePage('overview')
     } catch (err) {
       setError(err.message)
-      setResult({
-        status: 'error',
-        query: value,
-        rows: [],
-        answer_text: '',
-        message: err.message,
-        transport: null
-      })
+    } finally {
+      setLoading(false)
+      event.target.value = ''
+    }
+  }
+
+  async function handleSample(id) {
+    setActiveSamplePacketId(id)
+    setUploadedPreviewFiles((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.url))
+      return []
+    })
+    setLoading(true)
+    setError('')
+    try {
+      const payload = await parseSamplePacket(id)
+      setState(payload)
+      setSelectedDocumentId(payload.documents?.[0]?.file_id ?? null)
+      setDeliveryTab('declaration')
+      setActivePage('overview')
+    } catch (err) {
+      setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault()
-    await submitSearch(query)
+  async function handleResolve(form) {
+    const resolutions = Object.entries(form).map(([field, payload]) => ({ field, ...payload }))
+    setResolving(true)
+    setError('')
+    try {
+      const payload = await resolveIssues(state.documents, resolutions)
+      setState((current) => ({ ...current, ...payload }))
+      setSelectedDocumentId(payload.documents?.[0]?.file_id ?? state.documents?.[0]?.file_id ?? null)
+      setDeliveryTab('declaration')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setResolving(false)
+    }
   }
 
-  async function handleSampleClick(text) {
-    setQuery(text)
-    await submitSearch(text)
-  }
+  function handleWorkflowClick(node, index) {
+    setActiveWorkflowIndex(index)
 
-  async function handleCopyAnswer() {
-    if (!result.answer_text) return
-    await navigator.clipboard.writeText(result.answer_text)
+    if (/报关单生成/.test(node.title)) {
+      setDeliveryTab('declaration')
+      setActivePage('declaration')
+      return
+    }
+
+    if (/模拟提交/.test(node.title)) {
+      setDeliveryTab('gateway')
+      setActivePage('declaration')
+      return
+    }
+
+    if (state.documents.length) {
+      setActivePage('review')
+    }
   }
 
   return (
-    <div className="security-demo-shell">
-      <header className="hero">
-        <div className="hero-copy">
-          <span className="hero-kicker">LangCore Demo</span>
-          <h1>安全检查技术规范问答</h1>
-          <p>
-            输入现场隐患描述，系统按现有知识材料检索规范文件、条款号和依据片段。最终结果固定渲染为表格，便于客户演示和人工复核。
-          </p>
+    <div className="app-shell app-shell-v2">
+      <header className="page-header page-header-bar">
+        <div className="page-header-main">
+          <div className="page-header-left">
+            <div className="page-header-title">
+              <h1>统一单证解析与报关单预览</h1>
+            </div>
+          </div>
+          <nav className="page-step-nav" aria-label="页面步骤">
+            <button className={`page-step-item ${activePage === 'overview' ? 'page-step-item-active' : ''}`} onClick={() => setActivePage('overview')}>
+              <span className="page-step-index">01</span>
+              <span className="page-step-copy">
+                <strong>首页进度</strong>
+                <small>输入材料与流程概览</small>
+              </span>
+            </button>
+            <button
+              className={`page-step-item ${activePage === 'review' ? 'page-step-item-active' : ''}`}
+              onClick={() => setActivePage('review')}
+              disabled={!state.documents.length}
+            >
+              <span className="page-step-index">02</span>
+              <span className="page-step-copy">
+                <strong>文件预览与确认</strong>
+                <small>查看文件并处理待确认字段</small>
+              </span>
+            </button>
+            <button
+              className={`page-step-item ${activePage === 'declaration' ? 'page-step-item-active' : ''}`}
+              onClick={() => setActivePage('declaration')}
+              disabled={!state.declaration_draft}
+            >
+              <span className="page-step-index">03</span>
+              <span className="page-step-copy">
+                <strong>报关单预览</strong>
+                <small>查看统一报关单与模拟提交</small>
+              </span>
+            </button>
+          </nav>
         </div>
-        <div className="hero-stats">
-          {stats.map((item) => (
-            <article key={item.label} className="stat-card">
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-            </article>
-          ))}
+        <div className="header-meta">
+          <span className="meta-chip">支持多格式文档</span>
+          <span className="meta-chip">统一报关单结构</span>
         </div>
       </header>
 
       {error && <div className="error-banner">{error}</div>}
 
-      <main className="security-layout">
-        <section className="panel panel-input">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">输入与样例</p>
-              <h2>现场隐患描述</h2>
-            </div>
-            <span className="status-dot">{loading ? '检索中' : '已就绪'}</span>
-          </div>
-
-          <form className="query-form" onSubmit={handleSubmit}>
-            <div className="sample-select-wrap">
-              <label htmlFor="sample-question" className="sample-select-label">
-                样例问题
-              </label>
-              <select
-                id="sample-question"
-                className="sample-select"
-                value=""
-                onChange={(event) => {
-                  const value = event.target.value
-                  if (!value) return
-                  setQuery(value)
-                }}
-                disabled={loading}
-              >
-                <option value="">请选择一个样例问题</option>
-                {samplePrompts.map((prompt) => (
-                  <option key={prompt.id} value={prompt.text}>
-                    {prompt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <textarea
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="例如：废水处理区域多个有限空间集中布置，但现场未设置安全风险告知牌。"
-              rows={5}
-            />
-            <div className="query-actions">
-              <button type="submit" className="primary-action" disabled={loading}>
-                {loading ? '正在检索…' : '开始检索'}
-              </button>
-              <button type="button" className="secondary-action" onClick={() => setQuery('')} disabled={loading}>
-                清空输入
-              </button>
-            </div>
-          </form>
-
-        </section>
-
-        <section className="panel panel-result">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">结果展示</p>
-              <h2>检查依据表</h2>
-            </div>
-            <div className="result-head-actions">
-              <span className={`result-badge result-badge-${result.status}`}>{labelForStatus(result.status)}</span>
-              <button type="button" className="secondary-action compact" onClick={handleCopyAnswer} disabled={!result.answer_text}>
-                复制严格输出
-              </button>
-            </div>
-          </div>
-
-          {result.status === 'idle' && (
-            <div className="empty-state">
-              <h3>等待输入</h3>
-              <p>请输入一条现场隐患描述，或直接点击左侧样例，查看表格化结果。</p>
-            </div>
-          )}
-
-          {result.status !== 'idle' && result.rows.length > 0 && (
-            <>
-              <div className="query-summary">
-                <span className="query-summary-label">当前问题</span>
-                <strong>{result.query}</strong>
-                <small>{result.message}</small>
-                {result.transport?.repoQueries?.length > 0 && (
-                  <em className="transport-note">检索问题：{result.transport.repoQueries.join('；')}</em>
-                )}
-              </div>
-
-              <div className="table-shell">
-                <table className="result-table">
-                  <thead>
-                    <tr>
-                      <th>序号</th>
-                      <th>规范文件</th>
-                      <th>条款号</th>
-                      <th>依据片段</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.rows.map((row) => (
-                      <tr key={`${row.fileName}-${row.clauseNo}`}>
-                        <td>{row.id}</td>
-                        <td>{row.fileName}</td>
-                        <td>{row.clauseNo}</td>
-                        <td>{row.evidence}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-
-          {progressState.visible && (
-            <div className="progress-card">
-              <div className="progress-copy">
-                <span className={`progress-dot progress-dot-${progressState.tone}`} />
+      <main className="page-stack">
+        <section className="workspace-main panel workspace-main-single">
+          {activePage === 'overview' && (
+            <section className="section-block">
+              <div className="section-heading">
                 <div>
-                  <strong>{progressState.title}</strong>
-                  <p>{progressState.description}</p>
+                  <p className="section-index">01</p>
+                  <h2>材料输入与流程进度</h2>
                 </div>
               </div>
-              <div className="progress-tags">
-                {progressState.tags.map((tag) => (
-                  <span key={tag} className="progress-tag">
-                    {tag}
-                  </span>
-                ))}
+
+              <div className="overview-input-panel">
+                <div className="input-entry-shell">
+                  <div className="input-entry input-entry-upload">
+                    <div className="input-entry-head">
+                      <span className="input-entry-label">方式 A</span>
+                      <h3>上传本地文件</h3>
+                    </div>
+                    <p className="muted input-entry-note">支持 PDF、Excel、Word，上传后直接进入解析流程。</p>
+                    <label className="primary-button upload-button upload-button-wide">
+                      选择本地文件
+                      <input type="file" multiple onChange={handleUpload} />
+                    </label>
+                  </div>
+                  <div className="input-entry-divider">
+                    <span>或</span>
+                  </div>
+                  <div className="input-entry input-entry-sample">
+                    <div className="input-entry-head">
+                      <span className="input-entry-label">方式 B</span>
+                      <h3>使用现成 Demo</h3>
+                    </div>
+                    <p className="muted input-entry-note">适合第一次演示，直接加载预制样例包。</p>
+                    <details className="sample-dropdown">
+                      <summary className="sample-dropdown-trigger">
+                        <span>选择 Demo 样例包</span>
+                        <small>{samplePackets.length} 个可选</small>
+                      </summary>
+                      <div className="sample-dropdown-list">
+                        {samplePackets.map((packet) => (
+                          <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
+                            <strong>{packet.label}</strong>
+                            <span>{packet.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                </div>
+
+                <div className="summary-inline summary-inline-overview">
+                  {(summaryCards.length > 0 ? summaryCards : [{ label: '当前状态', value: '等待输入' }]).map((card) => (
+                    <article className="summary-chip" key={card.label}>
+                      <label>{card.label}</label>
+                      <strong>{card.value}</strong>
+                    </article>
+                  ))}
+                </div>
               </div>
-            </div>
+
+              {state.documents.length ? (
+                <div className="workflow-stage">
+                  <div className="panel-header">
+                    <h3>Agent 工作流</h3>
+                    <span>{workflowItems.length} 个节点</span>
+                  </div>
+                  <WorkflowPanel
+                    workflow={workflowItems}
+                    showHeader={false}
+                    activeIndex={activeWorkflowIndex}
+                    onNodeClick={handleWorkflowClick}
+                  />
+                </div>
+              ) : (
+                <div className="workflow-stage">
+                  <div className="panel-header">
+                    <h3>Agent 工作流</h3>
+                    <span>{workflowItems.length} 个节点</span>
+                  </div>
+                  <WorkflowPanel
+                    workflow={workflowItems}
+                    showHeader={false}
+                    activeIndex={-1}
+                  />
+                  <p className="muted">先上传文件或加载样例包，流程会从“文件接收”开始推进。</p>
+                </div>
+              )}
+            </section>
           )}
 
-          {result.status === 'no_hit' && (
-            <div className="no-hit-card">
-              <h3>未命中当前知识材料</h3>
-              <p>检查依据：未检索到明确依据。请补充隐患发生区域、涉及设施设备名称、异常现象或现场标识信息后再试。</p>
-            </div>
-          )}
-
-          {result.status === 'pending' && (
-            <div className="no-hit-card">
-              <h3>正在检索</h3>
-              <p>{result.message}</p>
-              {result.transport?.repoQueries?.length > 0 && <p>当前知识库检索问题：{result.transport.repoQueries.join('；')}</p>}
-            </div>
-          )}
-
-          {result.status === 'error' && (
-            <div className="no-hit-card">
-              <h3>检索失败</h3>
-              <p>{result.message}</p>
-            </div>
-          )}
-
-          {result.answer_text && (
-            <div className="strict-output">
-              <div className="strict-output-head">
-                <span>严格输出文本</span>
-                <small>用于对接智能体或复制到演示稿</small>
+          {activePage === 'review' && (
+            <section className="section-block">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">02</p>
+                  <h2>文件预览与字段确认</h2>
+                </div>
               </div>
-              <pre>{result.answer_text}</pre>
-            </div>
+              {state.documents.length ? (
+                <div className="review-layout">
+                  <div className="review-preview-column">
+                    <div className="review-file-workbench">
+                      <div className="review-file-rail">
+                        <DocumentList documents={state.documents} selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} compact />
+                      </div>
+                      <div className="review-preview-pane">
+                        <DocumentPreviewPane document={selectedDocument} previewSource={previewSource} />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="review-issues-column">
+                    <IssueResolver issues={openIssues} onSubmit={handleResolve} busy={resolving} />
+                    <DocumentEvidence document={selectedDocument} compact />
+                  </div>
+                </div>
+              ) : (
+                <EmptyState title="文件预览与确认" message="上传文件后，这里显示原始预览、抽取依据和待确认字段。" />
+              )}
+            </section>
+          )}
+
+          {activePage === 'declaration' && (
+            <section className="section-block">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">03</p>
+                  <h2>统一报关单预览</h2>
+                </div>
+              </div>
+              <div className="subpage-tabs">
+                <button className={`subpage-tab ${deliveryTab === 'declaration' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('declaration')}>
+                  统一报关单
+                </button>
+                <button className={`subpage-tab ${deliveryTab === 'gateway' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('gateway')}>
+                  模拟报关宝
+                </button>
+              </div>
+              <div className="declaration-stack">
+                {deliveryTab === 'declaration'
+                  ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="统一报关单" message="完成解析后，这里会生成统一报关单结构。" />)
+                  : (state.submission_preview ? <SubmissionPreview preview={state.submission_preview} /> : <EmptyState title="模拟提交" message="生成报关单后，这里展示模拟关务宝提交效果。" />)}
+              </div>
+            </section>
           )}
         </section>
       </main>
 
-      <section className="panel sources-panel">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">知识材料</p>
-            <h2>当前演示知识来源</h2>
-          </div>
-        </div>
-
-        <div className="sources-grid">
-          {sources.map((source) => (
-            <article key={source.id} className="source-card">
-              <span>{source.standardNo}</span>
-              <strong>{source.fileName}</strong>
-              <p>{source.scope}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+      {(loading || resolving) && <div className="loading-mask">{loading ? '正在解析单据...' : '正在应用人工确认...'}</div>}
     </div>
   )
 }
 
-function labelForStatus(status) {
-  if (status === 'matched') return '已命中'
-  if (status === 'no_hit') return '未命中'
-  if (status === 'empty') return '待输入'
-  if (status === 'pending') return '检索中'
-  if (status === 'error') return '失败'
-  return '待检索'
+function EmptyState({ title, message }) {
+  return (
+    <section className="panel empty-panel">
+      <div className="panel-header">
+        <h3>{title}</h3>
+        <span>未生成</span>
+      </div>
+      <p className="muted">{message}</p>
+    </section>
+  )
 }
 
-function normalizeLiveEvent(payload) {
-  const base = {
-    id: payload.id || `${Date.now()}-${Math.random()}`,
-    kind: payload.type || 'message',
-    label: '过程',
-    title: '收到实时事件',
-    detail: ''
-  }
-
-  if (payload.type === 'repo') {
-    return {
-      ...base,
-      kind: 'repo',
-      label: '检索',
-      title: payload.data?.query || '知识库检索中',
-      detail: payload.data?.status || ''
-    }
-  }
-
-  const text = extractEventText(payload)
-  return {
-    ...base,
-    kind: payload.type || 'message',
-    label: payload.type === 'reasoning' ? '推理' : '消息',
-    title: text || '收到上游响应',
-    detail: payload.role ? `角色：${payload.role}` : ''
-  }
+function mimeFromName(filename = '') {
+  const lower = filename.toLowerCase()
+  if (lower.endsWith('.pdf')) return 'application/pdf'
+  if (lower.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (lower.endsWith('.xls')) return 'application/vnd.ms-excel'
+  if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (lower.endsWith('.doc')) return 'application/msword'
+  return 'application/octet-stream'
 }
 
-function extractEventText(payload) {
-  if (typeof payload.content === 'string' && payload.content.trim()) return payload.content.trim()
-  if (typeof payload.delta === 'string' && payload.delta.trim()) return payload.delta.trim()
-  if (typeof payload.data === 'string' && payload.data.trim()) return payload.data.trim()
-  if (Array.isArray(payload.content)) {
-    const text = payload.content
-      .map((part) => {
-        if (typeof part === 'string') return part
-        if (typeof part?.text === 'string') return part.text
-        if (typeof part?.content === 'string') return part.content
-        return ''
-      })
-      .join('')
-      .trim()
-    if (text) return text
-  }
-
-  return ''
+function normalizeFileToken(value = '') {
+  return String(value).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
-function buildProgressState(liveEvents, loading, result) {
-  const repoEvents = liveEvents.filter((event) => event.kind === 'repo')
-  const runningCount = repoEvents.filter((event) => event.detail === 'RUNNING').length
-  const successCount = repoEvents.filter((event) => event.detail === 'SUCCEED').length
-
-  if (loading || result.status === 'pending') {
-    return {
-      visible: true,
-      tone: 'running',
-      title: '知识库检索中',
-      description: '系统正在整理检查依据，请稍候。',
-      tags: [`检索任务 ${Math.max(repoEvents.length, 1)} 个`, runningCount > 0 ? `进行中 ${runningCount}` : '等待返回']
-    }
-  }
-
-  if (result.status === 'matched') {
-    return {
-      visible: true,
-      tone: 'done',
-      title: '检查依据已生成',
-      description: '结果已整理为表格，可直接用于演示或人工复核。',
-      tags: [`命中 ${result.rows.length} 条`, successCount > 0 ? `检索完成 ${successCount}` : '已完成']
-    }
-  }
-
-  if (result.status === 'no_hit') {
-    return {
-      visible: true,
-      tone: 'quiet',
-      title: '未命中明确依据',
-      description: '当前描述未能定位到明确条款，可补充区域、设备名称或异常现象后重试。',
-      tags: [successCount > 0 ? `已完成 ${successCount} 次检索` : '检索结束']
-    }
-  }
-
-  if (result.status === 'error') {
-    return {
-      visible: true,
-      tone: 'error',
-      title: '服务调用失败',
-      description: result.message || '请稍后重试。',
-      tags: ['调用异常']
-    }
-  }
-
-  return {
-    visible: false,
-    tone: 'quiet',
-    title: '',
-    description: '',
-    tags: []
-  }
+function toWorkflowStatusLabel(value) {
+  if (value === 'completed') return '已完成'
+  if (value === 'needs_confirm') return '待确认'
+  if (value === 'failed') return '失败'
+  return '处理中'
 }
