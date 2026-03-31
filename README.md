@@ -44,6 +44,28 @@ Notes:
 - Sample packet preview and parsing work online because `sample-assets/**` is included in the build artifacts via `edgeone.json`
 - This project does not rely on client-side path routing, so no SPA rewrite is needed
 
+## Zeabur
+
+This repo can be deployed to Zeabur directly with the root `Dockerfile`.
+
+Recommended Zeabur setup:
+
+1. Import the GitHub repository.
+2. Keep the project root as `/`.
+3. Let Zeabur detect the existing `Dockerfile`.
+4. Expose port `8080` or map the Zeabur service port to the `PORT` environment variable.
+5. Set environment variables as needed:
+   - `DASHSCOPE_API_KEY`
+   - `LANGCORE_SHARE_URL` (optional)
+   - `LANGCORE_BOT_ID` (optional)
+   - `LANGCORE_TIMEOUT_MS` (optional)
+
+Notes:
+
+- The container builds the Vite frontend during image build and serves it from the Express server.
+- The default runtime port in the container is `8080`.
+- If Zeabur injects its own `PORT`, the Express server will honor it automatically.
+
 ## Demo capabilities
 
 - Upload mixed files or load local sample packets
