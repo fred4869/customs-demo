@@ -93,7 +93,8 @@ export async function extractDocuments(files, dashscopeConfig) {
   const documents = []
   for (const [index, file] of files.entries()) {
     const filename = decodeFilename(file.originalname)
-    const rawText = await readFileText({ ...file, originalname: filename })
+    const workbook = buildWorkbookSnapshot({ ...file, originalname: filename })
+    const rawText = await readFileText({ ...file, originalname: filename }, workbook)
     const documentType = classifyDocument(filename, rawText)
     const extraction = extractStructuredData({
       fileId: toFileId(filename, index),
@@ -101,6 +102,7 @@ export async function extractDocuments(files, dashscopeConfig) {
       filename,
       documentType,
       text: rawText,
+      workbook,
       buffer: file.buffer,
       mimetype: file.mimetype
     })
@@ -209,12 +211,10 @@ function toPublicSamplePath(filePath = '') {
 async function readFileText(file) {
   const extension = extname(file.originalname)
   if (['.xlsx', '.xls'].includes(extension)) {
-    const workbook = XLSX.read(file.buffer, { type: 'buffer' })
-    return workbook.SheetNames.map((sheetName) => {
-      const sheet = workbook.Sheets[sheetName]
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
-      return [`# ${sheetName}`, ...rows.map((row) => row.join(' | '))].join('\n')
-    }).join('\n\n')
+    const workbook = buildWorkbookSnapshot(file)
+    return workbook
+      ? workbook.sheets.map((sheet) => [`# ${sheet.name}`, ...sheet.rows.map((row) => row.join(' | '))].join('\n')).join('\n\n')
+      : ''
   }
 
   if (extension === '.pdf') {
@@ -249,14 +249,14 @@ function classifyDocument(filename, text) {
   return DOC_TYPES.other
 }
 
-function extractStructuredData({ fileId, sourceIndex, filename, documentType, text }) {
+function extractStructuredData({ fileId, sourceIndex, filename, documentType, text, workbook }) {
   const lines = text
     .split(/\r?\n/)
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean)
 
-  const lineItems = extractLineItems(documentType, lines, filename)
-  const header = buildHeaderCandidates(documentType, lines, filename, lineItems)
+  const lineItems = extractLineItems(documentType, lines, filename, workbook)
+  const header = buildHeaderCandidates(documentType, lines, filename, lineItems, workbook)
 
   return {
     file_id: fileId,
@@ -275,7 +275,11 @@ function extractStructuredData({ fileId, sourceIndex, filename, documentType, te
   }
 }
 
-function buildHeaderCandidates(documentType, lines, filename, lineItems = []) {
+function buildHeaderCandidates(documentType, lines, filename, lineItems = [], workbook = null) {
+  if (documentType === DOC_TYPES.reference && isStructured9710Workbook(workbook)) {
+    return build9710WorkbookHeaderCandidates(workbook, lineItems, filename)
+  }
+
   const text = lines.join('\n')
   const fileNameText = normalizeWhitespace(filename)
   const normalizedLines = lines.map((line) => normalizeWhitespace(line))
@@ -481,7 +485,12 @@ function parseLooseNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function extractLineItems(documentType, lines, filename) {
+function extractLineItems(documentType, lines, filename, workbook = null) {
+  if (documentType === DOC_TYPES.reference && isStructured9710Workbook(workbook)) {
+    const workbookItems = extract9710WorkbookLineItems(workbook)
+    if (workbookItems.length) return workbookItems
+  }
+
   if (documentType === DOC_TYPES.reference) {
     const declarationItems = extractReferenceDeclarationItems(lines)
     if (declarationItems.length) return declarationItems
@@ -824,4 +833,189 @@ function getMimeFromPath(filePath) {
   if (extension === '.xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   if (extension === '.xls') return 'application/vnd.ms-excel'
   return 'application/octet-stream'
+}
+
+function buildWorkbookSnapshot(file) {
+  const extension = extname(file.originalname)
+  if (!['.xlsx', '.xls'].includes(extension)) return null
+
+  const workbook = XLSX.read(file.buffer, { type: 'buffer' })
+  return {
+    sheet_names: workbook.SheetNames,
+    sheets: workbook.SheetNames.map((sheetName) => ({
+      name: sheetName,
+      rows: XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' })
+    }))
+  }
+}
+
+function isStructured9710Workbook(workbook) {
+  if (!workbook?.sheet_names?.length) return false
+  const names = new Set(workbook.sheet_names.map((name) => normalizeWhitespace(name)))
+  return ['合同', '发票', '装箱单', '报关单'].every((name) => names.has(name))
+}
+
+function getWorkbookSheet(workbook, targetName) {
+  return workbook?.sheets?.find((sheet) => normalizeWhitespace(sheet.name) === targetName) ?? null
+}
+
+function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
+  const header = {
+    import_export_flag: [],
+    declaration_template: [],
+    domestic_consignor: [],
+    overseas_consignor: [],
+    buyer_seller: [],
+    trade_country: [],
+    destination_country: [],
+    origin_country: [],
+    transport_mode: [],
+    package_count: [],
+    gross_weight_kg: [],
+    net_weight_kg: [],
+    currency: [],
+    total_amount: [],
+    terms_of_delivery: []
+  }
+
+  const declarationSheet = getWorkbookSheet(workbook, '报关单')
+  const packingSheet = getWorkbookSheet(workbook, '装箱单')
+  const invoiceSheet = getWorkbookSheet(workbook, '发票') ?? getWorkbookSheet(workbook, '合同')
+
+  pushCandidate(header.import_export_flag, 'export', 0.98, '报关单')
+  pushCandidate(header.declaration_template, '9710参考模板', 0.98, filename)
+
+  const transportMode = normalizeWhitespace(cellAt(declarationSheet, 5, 8))
+  if (transportMode) {
+    pushCandidate(header.transport_mode, transportMode.includes('海') ? 'SEA' : transportMode, 0.95, '报关单')
+  }
+
+  const tradeCountry = maybeCountry(cellAt(declarationSheet, 9, 8) || '')
+  const destinationCountry = maybeCountry(cellAt(declarationSheet, 9, 12) || '')
+  if (tradeCountry) pushCandidate(header.trade_country, tradeCountry, 0.96, '报关单')
+  if (destinationCountry) pushCandidate(header.destination_country, destinationCountry, 0.96, '报关单')
+  if (lineItems[0]?.origin_country) pushCandidate(header.origin_country, lineItems[0].origin_country, 0.94, '报关单商品行')
+
+  const packageCell = normalizeWhitespace(cellAt(declarationSheet, 11, 8))
+  const packageCount = packageCell ? parseNumber(packageCell.replace(/[^\d.]/g, '')) : null
+  if (packageCount !== null) pushCandidate(header.package_count, Math.round(packageCount), 0.97, '报关单')
+
+  const grossWeight = parseNumber(cellAt(declarationSheet, 11, 10))
+  const netWeight = parseNumber(cellAt(declarationSheet, 11, 12))
+  if (grossWeight !== null) pushCandidate(header.gross_weight_kg, round2(grossWeight), 0.97, '报关单')
+  if (netWeight !== null) pushCandidate(header.net_weight_kg, round2(netWeight), 0.97, '报关单')
+
+  const inco = normalizeWhitespace(cellAt(declarationSheet, 11, 14))
+  if (inco) pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.96, '报关单')
+
+  const invoiceTotal = extractWorkbookTotal(invoiceSheet)
+  const derivedTotal = lineItems.length ? round2(lineItems.reduce((sum, item) => sum + (parseNumber(item.line_amount) ?? 0), 0)) : null
+  const totalAmount = invoiceTotal ?? derivedTotal
+  if (totalAmount !== null) pushCandidate(header.total_amount, totalAmount, 0.96, '发票/报关单商品行')
+
+  const currency = normalizeWorkbookCurrency(cellAt(declarationSheet, 17, 16)) ?? 'USD'
+  pushCandidate(header.currency, currency, 0.95, '报关单商品行')
+
+  const seller = extractWorkbookSeller(invoiceSheet)
+  if (seller) pushCandidate(header.overseas_consignor, seller, 0.72, '合同/发票')
+
+  const packingCountry = normalizeWhitespace(cellAt(packingSheet, 5, 0))
+  if (packingCountry && /china/i.test(packingCountry)) {
+    pushCandidate(header.origin_country, maybeCountry('china'), 0.86, '装箱单')
+  }
+
+  return header
+}
+
+function extract9710WorkbookLineItems(workbook) {
+  const declarationSheet = getWorkbookSheet(workbook, '报关单')
+  if (!declarationSheet?.rows?.length) return []
+
+  const items = []
+  for (const row of declarationSheet.rows) {
+    const lineNo = normalizeWhitespace(row?.[0])
+    if (!/^\d{2}$/.test(lineNo)) continue
+
+    const hsCode = normalizeWhitespace(row?.[1])
+    const productName = normalizeWhitespace(row?.[3])
+    const qtyCell = normalizeWhitespace(row?.[8])
+    const { qty, unit } = parseWorkbookQuantityUnit(qtyCell)
+    const unitPrice = parseNumber(row?.[11])
+    const lineAmount = parseNumber(row?.[13])
+    const currency = normalizeWorkbookCurrency(row?.[16])
+    const originCountry = maybeCountry(row?.[18] ?? '')
+    const destinationCountry = maybeCountry(row?.[20] ?? '')
+    const sourceRegion = normalizeWhitespace(row?.[22])
+
+    if (!hsCode && !productName && qty === null && lineAmount === null) continue
+
+    items.push({
+      line_no: Number(lineNo),
+      product_code: hsCode || null,
+      product_name_cn: containsChinese(productName) ? productName : null,
+      product_name_en: productName && !containsChinese(productName) ? productName : null,
+      spec_model: productName || hsCode || null,
+      hs_code: hsCode || null,
+      declared_qty: qty,
+      declared_unit: normalizeUnit(unit || '把'),
+      unit_price: unitPrice,
+      line_amount: lineAmount,
+      currency,
+      origin_country: originCountry,
+      destination_country: destinationCountry,
+      source_region: sourceRegion || null,
+      source_documents: []
+    })
+  }
+
+  return items
+}
+
+function parseWorkbookQuantityUnit(value) {
+  const text = normalizeWhitespace(value)
+  if (!text) return { qty: null, unit: null }
+  const matched = text.match(/([\d.,]+)\s*([A-Za-z\u4e00-\u9fff]+)/)
+  if (!matched) return { qty: parseNumber(text), unit: null }
+  return {
+    qty: parseNumber(matched[1]),
+    unit: matched[2]
+  }
+}
+
+function normalizeWorkbookCurrency(value) {
+  const text = normalizeWhitespace(value)
+  if (!text) return null
+  if (text.includes('美元')) return 'USD'
+  if (text.includes('人民币')) return 'CNY'
+  if (/^usd$/i.test(text)) return 'USD'
+  if (/^cny$/i.test(text)) return 'CNY'
+  return text.toUpperCase()
+}
+
+function extractWorkbookTotal(sheet) {
+  if (!sheet?.rows?.length) return null
+  for (const row of sheet.rows) {
+    const firstCell = normalizeWhitespace(row?.[0])
+    if (!/^TOTAL$/i.test(firstCell)) continue
+    const value = parseNumber(row?.[5])
+    if (value !== null) return round2(value)
+  }
+  return null
+}
+
+function extractWorkbookSeller(sheet) {
+  if (!sheet?.rows?.length) return null
+  for (const row of sheet.rows) {
+    const firstCell = normalizeWhitespace(row?.[0])
+    if (!/^THE SELLER/i.test(firstCell)) continue
+    const seller = normalizeWhitespace(firstCell.replace(/^THE SELLER:\s*/i, ''))
+    if (!seller) return null
+    if (/^[A-Za-z]+$/.test(seller) && seller.length <= 12) return null
+    return seller
+  }
+  return null
+}
+
+function cellAt(sheet, rowIndex, columnIndex) {
+  return sheet?.rows?.[rowIndex]?.[columnIndex] ?? ''
 }
