@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import XLSX from 'xlsx'
 import { enrichWithDashScope } from '../lib/dashscope.js'
 import {
@@ -28,6 +31,7 @@ const DOC_TYPES = {
 const COUNTRY_WORDS = ['france', 'china', 'usa', 'united states', 'germany', 'japan', 'czech']
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const sampleAssetRoot = path.join(repoRoot, 'sample-assets')
+const execFileAsync = promisify(execFile)
 
 export async function loadFilesFromSample(packet) {
   return loadFilesFromSampleWithOrigin(packet)
@@ -229,11 +233,51 @@ async function readFileText(file) {
     } finally {
       await parser?.destroy().catch(() => {})
     }
+
+    const pythonText = await readPdfTextWithPython(file)
+    const sanitizedPythonText = sanitizePdfText(pythonText)
+    if (isReadableExtractedText(sanitizedPythonText)) return sanitizedPythonText
     return ''
   }
 
   const decoded = file.buffer.toString('utf8').replace(/\u0000/g, ' ')
   return isReadableExtractedText(decoded) ? decoded : ''
+}
+
+function sanitizePdfText(value = '') {
+  return String(value)
+    .replace(/_{20,}/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+async function readPdfTextWithPython(file) {
+  let tempPath = null
+  try {
+    tempPath = file.path
+    if (!tempPath) {
+      tempPath = path.join(os.tmpdir(), `customs-demo-${Date.now()}-${Math.random().toString(16).slice(2)}.pdf`)
+      await fs.writeFile(tempPath, file.buffer)
+    }
+    const script = [
+      'from pypdf import PdfReader',
+      'from pathlib import Path',
+      'import sys',
+      'p = Path(sys.argv[1])',
+      "print('\\\\n'.join((page.extract_text() or '') for page in PdfReader(str(p)).pages))"
+    ].join('; ')
+    const { stdout } = await execFileAsync('python3', ['-c', script, tempPath], {
+      maxBuffer: 10 * 1024 * 1024
+    })
+    return stdout || ''
+  } catch {
+    return ''
+  } finally {
+    if (tempPath && tempPath !== file.path) {
+      await fs.rm(tempPath, { force: true }).catch(() => {})
+    }
+  }
 }
 
 function classifyDocument(filename, text) {
@@ -286,6 +330,11 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
   const header = {
     import_export_flag: [],
     declaration_template: [],
+    contract_no: [],
+    customs_office: [],
+    filing_no: [],
+    destination_port: [],
+    departure_port: [],
     domestic_consignor: [],
     overseas_consignor: [],
     buyer_seller: [],
@@ -293,12 +342,21 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
     destination_country: [],
     origin_country: [],
     transport_mode: [],
+    transport_name: [],
+    supervision_mode: [],
+    levy_nature: [],
+    package_type: [],
     package_count: [],
     gross_weight_kg: [],
     net_weight_kg: [],
     currency: [],
     total_amount: [],
-    terms_of_delivery: []
+    terms_of_delivery: [],
+    marks_remarks: []
+  }
+
+  if (documentType === DOC_TYPES.reference) {
+    applyReferenceDeclarationHeaderCandidates(header, normalizedLines)
   }
 
   pushCandidate(header.declaration_template, documentType === DOC_TYPES.reference ? '历史报关模板' : '统一报关单', 0.7, fileNameText)
@@ -331,17 +389,6 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
   ])
   if (net !== null) pushCandidate(header.net_weight_kg, round2(net), 0.9, 'net weight')
 
-  const packages = matchNumber(text, [
-    /parcel\s+no\s*[:：]?\s*([\d.,]+)/i,
-    /packages?\s*[:：]?\s*([\d.,]+)/i,
-    /件数\s*[:：]?\s*([\d.,]+)/i,
-    /no\.\s*of\s*pieces\s*[:：]?\s*([\d.,]+)/i
-  ])
-  if (packages !== null) pushCandidate(header.package_count, Math.round(packages), 0.82, 'package count')
-
-  const inco = extractInco(normalizedLines, text)
-  if (inco) pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.78, inco)
-
   const overseas = normalizePartyValue(extractParty(normalizedLines, 'seller') || matchText(text, [
     /Shipper's Name and Address[\s\S]{0,180}?(SCHNEIDER ELECTRIC INDUSTRIES SAS)/i,
     /Schneider Electric Industries SAS/i,
@@ -372,14 +419,37 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
 
   if (/hawb|awb|air/i.test(text)) {
     pushCandidate(header.transport_mode, 'AIR', 0.9, 'HAWB/AWB')
-  } else if (/truck|road|陆运/i.test(text)) {
+  } else if (/\btruck\b|by road|road transport|陆运/i.test(text)) {
     pushCandidate(header.transport_mode, 'ROAD', 0.7, 'road')
   } else if (/by sea|ocean|vessel/i.test(text)) {
     pushCandidate(header.transport_mode, 'SEA', 0.82, 'sea freight wording')
   }
 
+  if (documentType === DOC_TYPES.packing) {
+    const totalNet = matchNumber(text, [/total net weight\s*[:：]?\s*([\d.,]+)/i])
+    const totalGross = matchNumber(text, [/total gross weight\s*[:：]?\s*([\d.,]+)/i])
+    if (totalNet !== null) pushCandidate(header.net_weight_kg, round2(totalNet), 0.94, 'packing list total net')
+    if (totalGross !== null) pushCandidate(header.gross_weight_kg, round2(totalGross), 0.94, 'packing list total gross')
+  }
+
   if (documentType === DOC_TYPES.reference) {
     pushCandidate(header.declaration_template, /9710/i.test(text + fileNameText) ? '9710参考模板' : '一般贸易参考模板', 0.9, fileNameText)
+  }
+
+  const packages = matchNumber(text, [
+    /parcel\s+no\s*[:：]?\s*([\d.,]+)/i,
+    /number of parcels\s*[:：]?\s*([\d.,]+)/i,
+    /^packages?\s*[:：]?\s*([\d.,]+)$/im,
+    /件数\s*[:：]?\s*([\d.,]+)/i,
+    /no\.\s*of\s*pieces\s*[:：]?\s*([\d.,]+)/i
+  ])
+  if (packages !== null && !header.package_count.length) {
+    pushCandidate(header.package_count, Math.round(packages), 0.82, 'package count')
+  }
+
+  const inco = extractInco(normalizedLines, text)
+  if (inco && !header.terms_of_delivery.length) {
+    pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.78, inco)
   }
 
   if (!header.package_count.length && documentType === DOC_TYPES.packing && lineItems.length) {
@@ -392,6 +462,62 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
   }
 
   return header
+}
+
+function applyReferenceDeclarationHeaderCandidates(header, lines) {
+  const declarationIndex = lines.findIndex((line) => /中华人民共和国海关出口货物报关单/i.test(line))
+  if (declarationIndex < 0) return
+
+  const declarationLines = lines.slice(declarationIndex, declarationIndex + 40)
+  const declarationText = declarationLines.join('\n')
+
+  const contractNo = matchText(declarationText, [/合同协议号\s+件数\s+包装种类\s+毛重.*\n([A-Z0-9-]+)\s+/i, /Contract NO\.?\s*[:：]?\s*([A-Z0-9-]+)/i])
+  if (contractNo) pushCandidate(header.contract_no, contractNo, 0.95, '报关单页')
+
+  const packageSummary = declarationLines.find((line) => /合同协议号.*件数.*包装种类.*毛重.*净重/i.test(line))
+  if (packageSummary) {
+    const nextLine = declarationLines[declarationLines.indexOf(packageSummary) + 1] || ''
+    const matched = nextLine.match(/^([A-Z0-9-]+)\s+(\d+)\s+(\S+)\s+([\d.,]+)\s+([\d.,]+)/)
+    if (matched) {
+      pushCandidate(header.package_count, parseNumber(matched[2]), 0.95, nextLine)
+      pushCandidate(header.package_type, matched[3], 0.94, nextLine)
+      pushCandidate(header.gross_weight_kg, parseNumber(matched[4]), 0.94, nextLine)
+      pushCandidate(header.net_weight_kg, parseNumber(matched[5]), 0.94, nextLine)
+    }
+  }
+
+  const modeLineIndex = declarationLines.findIndex((line) => /申报单位\s+监管方式\s+征免性质\s+备案号/i.test(line))
+  if (modeLineIndex >= 0) {
+    const nextLine = declarationLines[modeLineIndex + 1] || ''
+    const parts = nextLine.split(/\s+/).filter(Boolean)
+    if (parts[0]) pushCandidate(header.supervision_mode, parts[0], 0.92, nextLine)
+    if (parts[1]) pushCandidate(header.levy_nature, parts[1], 0.92, nextLine)
+  }
+
+  const routeLineIndex = declarationLines.findIndex((line) => /贸易国\(地区\)\s+运抵国\(地区\)\s+指运港\s+境内货源地/i.test(line))
+  if (routeLineIndex >= 0) {
+    const nextLine = declarationLines[routeLineIndex + 1] || ''
+    const parts = nextLine.split(/\s+/).filter(Boolean)
+    if (parts[0]) pushCandidate(header.trade_country, maybeCountry(parts[0]), 0.9, nextLine)
+    if (parts[1]) pushCandidate(header.destination_country, maybeCountry(parts[1]), 0.9, nextLine)
+  }
+
+  const transportLineIndex = declarationLines.findIndex((line) => /生产销售单位\s+运输方式\s+运输工具名称\s+提运单号/i.test(line))
+  if (transportLineIndex >= 0) {
+    const nextLine = declarationLines[transportLineIndex + 1] || ''
+    if (nextLine) {
+      const mode = /海运/.test(nextLine) ? 'SEA' : /空运/.test(nextLine) ? 'AIR' : null
+      if (mode) pushCandidate(header.transport_mode, mode, 0.9, nextLine)
+    }
+  }
+
+  const inco = matchText(declarationText, [/许可证号\s+成交方式\s+运费\s+保费\s+杂费\s*\n([A-Z]{3})/i])
+  if (inco) pushCandidate(header.terms_of_delivery, inco, 0.9, '报关单页')
+
+  const marksIdx = declarationLines.findIndex((line) => /标记唛码及备注/i.test(line))
+  if (marksIdx >= 0 && declarationLines[marksIdx + 1]) {
+    pushCandidate(header.marks_remarks, declarationLines[marksIdx + 1], 0.88, '报关单页')
+  }
 }
 
 function extractTotalAmount(lines, text) {
@@ -455,11 +581,14 @@ function normalizePartyValue(value, blacklist) {
   if (/\b(fca|cif|fob|exw|ddp|dap)\b/i.test(text)) return null
   if (/^[A-Z ]{1,12}$/.test(text)) return null
   if (/^\d+(\.\d+)*$/.test(text)) return null
+  if (text.length > 90) return null
+  const digitCount = (text.match(/\d/g) || []).length
+  if (digitCount > Math.max(8, text.length * 0.2)) return null
   if (!/[A-Za-z\u4e00-\u9fff]/.test(text)) return null
   return text
 }
 
-const PARTY_BLACKLIST = /(invoice no|invoice date|contract no|item|products|specification|quantity|unit price|total price|payment|beneficiary|bank|address|packing|delivery time|payment terms|note:|wooden case)/i
+const PARTY_BLACKLIST = /(invoice no|invoice date|contract no|item|products|specification|quantity|unit price|total price|payment|beneficiary|bank|address|packing|delivery time|payment terms|note:|wooden case|subject to the conditions of contract|unless specific contrary instructions|carriage|reverse hereof|shipment may be carried via intermediate stopping|shipper agrees|places which the carrier deems appropriate|shipper'?s attention is drawn|copies 1, 2 and 3 of this air waybill|it is agreed that the goods described herein|notice concerning carrier'?s limitation of liability|may increase such|limited to those of the european union|this includes, but is not limited to shipment or transfer|causes the to violate, such laws or regulations|signature of or his agent|total prepaid total collect)/i
 
 function extractInco(lines, text) {
   const direct = matchText(text, [
@@ -863,6 +992,11 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
   const header = {
     import_export_flag: [],
     declaration_template: [],
+    contract_no: [],
+    customs_office: [],
+    filing_no: [],
+    destination_port: [],
+    departure_port: [],
     domestic_consignor: [],
     overseas_consignor: [],
     buyer_seller: [],
@@ -870,12 +1004,17 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
     destination_country: [],
     origin_country: [],
     transport_mode: [],
+    transport_name: [],
+    supervision_mode: [],
+    levy_nature: [],
+    package_type: [],
     package_count: [],
     gross_weight_kg: [],
     net_weight_kg: [],
     currency: [],
     total_amount: [],
-    terms_of_delivery: []
+    terms_of_delivery: [],
+    marks_remarks: []
   }
 
   const declarationSheet = getWorkbookSheet(workbook, '报关单')
@@ -885,10 +1024,25 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
   pushCandidate(header.import_export_flag, 'export', 0.98, '报关单')
   pushCandidate(header.declaration_template, '9710参考模板', 0.98, filename)
 
+  const contractNo = normalizeWhitespace(cellAt(declarationSheet, 9, 0))
+  if (contractNo) pushCandidate(header.contract_no, contractNo, 0.97, '报关单')
+
+  const customsOffice = normalizeWhitespace(cellAt(declarationSheet, 3, 8))
+  if (customsOffice) pushCandidate(header.customs_office, customsOffice, 0.95, '报关单')
+
+  const filingNo = normalizeWhitespace(cellAt(declarationSheet, 3, 20))
+  if (filingNo) pushCandidate(header.filing_no, filingNo, 0.95, '报关单')
+
   const transportMode = normalizeWhitespace(cellAt(declarationSheet, 5, 8))
   if (transportMode) {
     pushCandidate(header.transport_mode, transportMode.includes('海') ? 'SEA' : transportMode, 0.95, '报关单')
   }
+
+  const supervisionMode = normalizeWhitespace(cellAt(declarationSheet, 7, 8))
+  if (supervisionMode) pushCandidate(header.supervision_mode, supervisionMode, 0.97, '报关单')
+
+  const levyNature = normalizeWhitespace(cellAt(declarationSheet, 7, 12))
+  if (levyNature) pushCandidate(header.levy_nature, levyNature, 0.97, '报关单')
 
   const tradeCountry = maybeCountry(cellAt(declarationSheet, 9, 8) || '')
   const destinationCountry = maybeCountry(cellAt(declarationSheet, 9, 12) || '')
@@ -899,7 +1053,6 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
   const packageCell = normalizeWhitespace(cellAt(declarationSheet, 11, 8))
   const packageCount = packageCell ? parseNumber(packageCell.replace(/[^\d.]/g, '')) : null
   if (packageCount !== null) pushCandidate(header.package_count, Math.round(packageCount), 0.97, '报关单')
-
   const grossWeight = parseNumber(cellAt(declarationSheet, 11, 10))
   const netWeight = parseNumber(cellAt(declarationSheet, 11, 12))
   if (grossWeight !== null) pushCandidate(header.gross_weight_kg, round2(grossWeight), 0.97, '报关单')
@@ -919,9 +1072,21 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
   const seller = extractWorkbookSeller(invoiceSheet)
   if (seller) pushCandidate(header.overseas_consignor, seller, 0.72, '合同/发票')
 
+  const marksRemarks = normalizeWhitespace(cellAt(declarationSheet, 15, 0))
+  if (marksRemarks) pushCandidate(header.marks_remarks, marksRemarks, 0.95, '报关单')
+
   const packingCountry = normalizeWhitespace(cellAt(packingSheet, 5, 0))
   if (packingCountry && /china/i.test(packingCountry)) {
     pushCandidate(header.origin_country, maybeCountry('china'), 0.86, '装箱单')
+  }
+
+  const routeLine = find9710RouteLine(invoiceSheet)
+  if (/ningbo port/i.test(routeLine)) {
+    pushCandidate(header.departure_port, '宁波', 0.72, routeLine)
+  }
+
+  if (sheetHasCartons(packingSheet)) {
+    pushCandidate(header.package_type, '纸箱', 0.74, '装箱单 CTN')
   }
 
   return header
@@ -929,6 +1094,7 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
 
 function extract9710WorkbookLineItems(workbook) {
   const declarationSheet = getWorkbookSheet(workbook, '报关单')
+  const sourceItems = extract9710SourceTradeItems(workbook)
   if (!declarationSheet?.rows?.length) return []
 
   const items = []
@@ -949,12 +1115,29 @@ function extract9710WorkbookLineItems(workbook) {
 
     if (!hsCode && !productName && qty === null && lineAmount === null) continue
 
+    const sourceItem = sourceItems.find((candidate, index) => (
+      index === items.length ||
+      (candidate.declared_qty !== null && qty !== null && Number(candidate.declared_qty) === Number(qty))
+    ))
+    const sourceCategory = inferUmbrellaCategory(sourceItem?.raw_description || '')
+    const declarationCategory = inferUmbrellaCategory(productName)
+    const preferredChineseName = sourceCategory?.cn || declarationCategory?.cn || productName || null
+    const preferredEnglishName = sourceCategory?.en || null
+    const preferredSpec = normalizeWhitespace(
+      sourceItem?.summary_description ||
+      sourceItem?.raw_description ||
+      productName ||
+      hsCode
+    )
+
+    const declarationElements = normalizeWhitespace(cellAt(declarationSheet, 19 + (items.length * 3), 0))
+
     items.push({
       line_no: Number(lineNo),
       product_code: hsCode || null,
-      product_name_cn: containsChinese(productName) ? productName : null,
-      product_name_en: productName && !containsChinese(productName) ? productName : null,
-      spec_model: productName || hsCode || null,
+      product_name_cn: preferredChineseName,
+      product_name_en: preferredEnglishName,
+      spec_model: preferredSpec || hsCode || null,
       hs_code: hsCode || null,
       declared_qty: qty,
       declared_unit: normalizeUnit(unit || '把'),
@@ -964,11 +1147,53 @@ function extract9710WorkbookLineItems(workbook) {
       origin_country: originCountry,
       destination_country: destinationCountry,
       source_region: sourceRegion || null,
+      declaration_elements: declarationElements || null,
       source_documents: []
     })
   }
 
   return items
+}
+
+function extract9710SourceTradeItems(workbook) {
+  const sheet = getWorkbookSheet(workbook, '发票') ?? getWorkbookSheet(workbook, '合同')
+  if (!sheet?.rows?.length) return []
+
+  const items = []
+  for (const row of sheet.rows) {
+    const description = normalizeWhitespace(row?.[0])
+    if (!description || /^COMMODITY&DESCRIPTION$/i.test(description) || /^TOTAL$/i.test(description)) continue
+    const qty = parseNumber(row?.[2])
+    const unitPrice = parseNumber(row?.[3])
+    const unit = normalizeWhitespace(row?.[4])
+    const amount = parseNumber(row?.[5])
+    if (qty === null && unitPrice === null && amount === null) continue
+
+    items.push({
+      raw_description: description,
+      summary_description: description.split(/\n+/)[0]?.trim() || description,
+      declared_qty: qty,
+      declared_unit: unit,
+      unit_price: unitPrice,
+      line_amount: amount
+    })
+  }
+  return items
+}
+
+function inferUmbrellaCategory(value = '') {
+  const text = normalizeWhitespace(value).toLowerCase()
+  if (!text) return null
+  if (text.includes('car umbrella')) {
+    return { cn: '车用雨伞', en: 'Car umbrella' }
+  }
+  if (text.includes('three fold umbrella')) {
+    return { cn: '三折雨伞', en: 'Three fold umbrella' }
+  }
+  if (text.includes('umbrella')) {
+    return { cn: '雨伞', en: 'Umbrella' }
+  }
+  return null
 }
 
 function parseWorkbookQuantityUnit(value) {
@@ -1018,4 +1243,18 @@ function extractWorkbookSeller(sheet) {
 
 function cellAt(sheet, rowIndex, columnIndex) {
   return sheet?.rows?.[rowIndex]?.[columnIndex] ?? ''
+}
+
+function find9710RouteLine(sheet) {
+  if (!sheet?.rows?.length) return ''
+  for (const row of sheet.rows) {
+    const text = normalizeWhitespace(row.join(' '))
+    if (/from .* port .* by sea/i.test(text)) return text
+  }
+  return ''
+}
+
+function sheetHasCartons(sheet) {
+  if (!sheet?.rows?.length) return false
+  return sheet.rows.some((row) => /CTN/i.test(normalizeWhitespace(row.join(' '))))
 }

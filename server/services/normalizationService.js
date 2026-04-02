@@ -7,6 +7,11 @@ import {
 
 const FIELD_PRIORITY = {
   goods_items: ['cargo_manifest', 'packing_list', 'invoice', 'declaration_reference', 'other'],
+  contract_no: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
+  customs_office: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
+  filing_no: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
+  destination_port: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
+  departure_port: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
   package_count: ['packing_list', 'cargo_manifest', 'invoice', 'declaration_reference', 'other'],
   gross_weight_kg: ['packing_list', 'cargo_manifest', 'invoice', 'declaration_reference', 'other'],
   net_weight_kg: ['packing_list', 'cargo_manifest', 'invoice', 'declaration_reference', 'other'],
@@ -19,6 +24,11 @@ const FIELD_PRIORITY = {
   destination_country: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
   origin_country: ['declaration_reference', 'cargo_manifest', 'packing_list', 'invoice', 'other'],
   transport_mode: ['packing_list', 'invoice', 'declaration_reference', 'cargo_manifest', 'other'],
+  transport_name: ['declaration_reference', 'packing_list', 'invoice', 'cargo_manifest', 'other'],
+  supervision_mode: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
+  levy_nature: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
+  package_type: ['declaration_reference', 'packing_list', 'invoice', 'cargo_manifest', 'other'],
+  marks_remarks: ['declaration_reference', 'invoice', 'packing_list', 'cargo_manifest', 'other'],
   terms_of_delivery: ['declaration_reference', 'invoice', 'packing_list', 'other'],
   import_export_flag: ['declaration_reference', 'invoice', 'packing_list', 'other'],
   declaration_template: ['declaration_reference', 'invoice', 'packing_list', 'other']
@@ -41,6 +51,11 @@ export function buildNormalizedRecord(documents, resolutions = []) {
   const fieldNames = [
     'import_export_flag',
     'declaration_template',
+    'contract_no',
+    'customs_office',
+    'filing_no',
+    'destination_port',
+    'departure_port',
     'domestic_consignor',
     'overseas_consignor',
     'buyer_seller',
@@ -48,6 +63,11 @@ export function buildNormalizedRecord(documents, resolutions = []) {
     'destination_country',
     'origin_country',
     'transport_mode',
+    'transport_name',
+    'supervision_mode',
+    'levy_nature',
+    'package_type',
+    'marks_remarks',
     'package_count',
     'gross_weight_kg',
     'net_weight_kg',
@@ -111,8 +131,11 @@ export function buildDeclarationDraft(normalizedRecord) {
     header: {
       declaration_no: buildDeclarationNo(header, compactDate),
       pre_entry_no: buildPreEntryNo(compactDate),
-      customs_office: header.import_export_flag === 'export' ? '上海海关' : '浦东机场海关',
-      filing_no: 'DEMO-备案-001',
+      contract_no: header.contract_no,
+      customs_office: header.customs_office ?? null,
+      filing_no: header.filing_no ?? null,
+      destination_port: header.destination_port ?? null,
+      departure_port: header.departure_port ?? null,
       import_export_flag: header.import_export_flag,
       declaration_date: declarationDate,
       import_export_date: compactDate,
@@ -120,21 +143,22 @@ export function buildDeclarationDraft(normalizedRecord) {
       overseas_consignor: header.overseas_consignor,
       buyer_seller: header.buyer_seller,
       trade_country: header.trade_country,
-      destination_country: header.destination_country ?? header.trade_country,
+      destination_country: header.destination_country ?? null,
       origin_country: primaryItem?.origin_country ?? header.origin_country,
       transport_mode: header.transport_mode,
-      transport_name: deriveTransportName(header.transport_mode),
+      transport_name: header.transport_name ?? null,
       declaration_template: header.declaration_template,
-      supervision_mode: deriveSupervisionMode(header.declaration_template, header.import_export_flag),
-      levy_nature: header.import_export_flag === 'export' ? '照章征税' : '一般征税',
-      package_type: '纸箱',
+      supervision_mode: header.supervision_mode ?? null,
+      levy_nature: header.levy_nature ?? null,
+      package_type: header.package_type ?? null,
+      marks_remarks: header.marks_remarks ?? null,
       package_count: header.package_count,
       gross_weight_kg: header.gross_weight_kg,
       net_weight_kg: header.net_weight_kg,
       currency: header.currency,
       total_amount: header.total_amount,
       terms_of_delivery: header.terms_of_delivery,
-      attached_docs: '发票 / 箱单 / EDI / 参考资料'
+      attached_docs: deriveAttachedDocs(header.declaration_template)
     },
     items,
     notes: [
@@ -165,11 +189,10 @@ function deriveTransportName(mode) {
   return '待确认'
 }
 
-function deriveSupervisionMode(template, importExportFlag) {
-  if (/9710/i.test(template ?? '')) return '9710'
-  if (/一般贸易/.test(template ?? '')) return '0110'
-  if (importExportFlag === 'export') return '0110'
-  return '保税流转'
+function deriveAttachedDocs(template) {
+  if (/9710/i.test(template ?? '')) return '合同 / 发票 / 装箱单 / 报关单参考'
+  if (/一般贸易/.test(template ?? '')) return '发票 / 箱单 / 参考资料'
+  return '发票 / 箱单 / 参考资料'
 }
 
 export function buildSubmissionPreview(declarationDraft) {
@@ -269,7 +292,11 @@ function buildGoodsItems(documents, resolution) {
     declared_unit: normalizeUnit(item.declared_unit ?? 'PCS'),
     unit_price: parseNumber(item.unit_price),
     line_amount: parseNumber(item.line_amount),
+    currency: item.currency ?? null,
     origin_country: maybeCountry(item.origin_country ?? ''),
+    destination_country: maybeCountry(item.destination_country ?? ''),
+    source_region: item.source_region ?? null,
+    declaration_elements: item.declaration_elements ?? null,
     source_documents: [{
       file_id: baseDocument?.file_id ?? null,
       file_name: baseDocument?.file_name ?? null,
@@ -291,7 +318,11 @@ function buildGoodsItems(documents, resolution) {
       target.declared_unit ??= normalizeUnit(extra.declared_unit ?? 'PCS')
       target.unit_price ??= parseNumber(extra.unit_price)
       target.line_amount ??= parseNumber(extra.line_amount)
+      target.currency ??= extra.currency ?? null
       target.origin_country ??= maybeCountry(extra.origin_country ?? '')
+      target.destination_country ??= maybeCountry(extra.destination_country ?? '')
+      target.source_region ??= extra.source_region ?? null
+      target.declaration_elements ??= extra.declaration_elements ?? null
       target.source_documents.push({
         file_id: document.file_id,
         file_name: document.file_name,
@@ -346,7 +377,11 @@ function applyGoodsResolution(items, resolution) {
     declared_unit: normalizeUnit(item.declared_unit ?? 'PCS'),
     unit_price: parseNumber(item.unit_price),
     line_amount: parseNumber(item.line_amount),
+    currency: item.currency ?? null,
     origin_country: maybeCountry(item.origin_country ?? ''),
+    destination_country: maybeCountry(item.destination_country ?? ''),
+    source_region: item.source_region ?? null,
+    declaration_elements: item.declaration_elements ?? null,
     source_documents: [{ file_id: null, file_name: 'manual', source: 'manual' }]
   }))
 }
@@ -376,6 +411,9 @@ function normalizeFieldValue(field, value) {
   if (['gross_weight_kg', 'net_weight_kg', 'total_amount'].includes(field)) {
     const parsed = parseNumber(value)
     return parsed === null ? null : round2(parsed)
+  }
+  if (['contract_no', 'customs_office', 'filing_no', 'destination_port', 'departure_port', 'transport_name', 'supervision_mode', 'levy_nature', 'package_type', 'marks_remarks'].includes(field)) {
+    return String(value).trim()
   }
   if (['origin_country', 'trade_country', 'destination_country'].includes(field)) return maybeCountry(value)
   if (field === 'currency') return String(value).trim().toUpperCase()
