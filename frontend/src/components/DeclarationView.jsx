@@ -1,5 +1,3 @@
-import { displayFilename } from '../lib/filenames'
-
 const HEADER_LAYOUT = [
   [
     { label: '境内发货人', field: 'domestic_consignor', span: 8 },
@@ -10,15 +8,15 @@ const HEADER_LAYOUT = [
   ],
   [
     { label: '境外收货人', field: 'overseas_consignor', span: 8 },
-    { label: '运输方式', field: 'transport_name', span: 4 },
+    { label: '运输方式', field: 'transport_mode', span: 4 },
     { label: '运输工具名称及航次号', field: 'transport_name', span: 8 },
-    { label: '提运单号', value: '待确认', span: 4 }
+    { label: '提运单号', field: 'bill_no', span: 4 }
   ],
   [
     { label: '生产销售单位', field: 'buyer_seller', fallbackField: 'domestic_consignor', span: 8 },
     { label: '监管方式', field: 'supervision_mode', span: 4 },
     { label: '征免性质', field: 'levy_nature', span: 4 },
-    { label: '许可证号', value: '待确认', span: 8 }
+    { label: '许可证号', field: 'license_no', span: 8 }
   ],
   [
     { label: '合同协议号', field: 'contract_no', span: 8 },
@@ -42,7 +40,7 @@ export default function DeclarationView({ draft }) {
   return (
     <section className="panel declaration-sheet-panel">
       <div className="panel-header">
-        <h3>报关单预览</h3>
+        <h3>草单预览</h3>
         <span className="pill">按出口货物报关单样式展示</span>
       </div>
 
@@ -80,7 +78,7 @@ export default function DeclarationView({ draft }) {
             <div className="sheet-record-cell" style={{ gridColumn: 'span 24' }}>
               <label>随附单证及编号</label>
               <strong className="sheet-record-attachments">
-                {draft.header?.attached_docs || buildAttachmentFallback(draft.items)}
+                {formatDisplayValue(draft.header?.attached_docs)}
               </strong>
             </div>
           </div>
@@ -89,7 +87,7 @@ export default function DeclarationView({ draft }) {
             <div className="sheet-record-cell" style={{ gridColumn: 'span 24' }}>
               <label>标记唛码及备注</label>
               <strong className="sheet-record-remark">
-                {buildMarksAndRemarks(draft)}
+                {formatDisplayValue(draft.header?.marks_remarks)}
               </strong>
             </div>
           </div>
@@ -161,7 +159,7 @@ function FragmentRow({ item, draft }) {
       <td>{formatNumber(item.line_amount)}</td>
       <td>{formatDisplayValue(item.currency || draft.header?.currency)}</td>
       <td>{formatDisplayValue(item.origin_country || draft.header?.origin_country)}</td>
-      <td>{formatDisplayValue(item.destination_country || draft.header?.destination_country || draft.header?.trade_country)}</td>
+      <td>{formatDisplayValue(item.destination_country || draft.header?.destination_country)}</td>
       <td>{formatDisplayValue(item.source_region || '')}</td>
     </tr>
   )
@@ -181,21 +179,6 @@ function resolveSheetCellValue(header, item) {
   if (value !== null && value !== undefined && value !== '') return formatDisplayValue(value)
   if (item.fallbackField) return formatDisplayValue(header?.[item.fallbackField])
   return ''
-}
-
-function buildAttachmentFallback(items = []) {
-  const value = items
-    .slice(0, 3)
-    .map((item) => item.source_documents?.map((doc) => displayFilename(doc.file_name || doc.source)).join(' / '))
-    .filter(Boolean)
-    .join('；')
-  return value || '系统自动归并单证'
-}
-
-function buildMarksAndRemarks(draft) {
-  if (draft.header?.marks_remarks) return draft.header.marks_remarks
-  const goods = (draft.items || []).map((item) => item.product_name_cn || item.product_name_en).filter(Boolean)
-  return `${goods.join('、')} / ${formatDisplayValue(draft.header?.supervision_mode)} / ${formatDisplayValue(draft.header?.destination_country || draft.header?.trade_country)}`
 }
 
 function padLineNo(value) {

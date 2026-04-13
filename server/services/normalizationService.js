@@ -190,9 +190,9 @@ function deriveTransportName(mode) {
 }
 
 function deriveAttachedDocs(template) {
-  if (/9710/i.test(template ?? '')) return '合同 / 发票 / 装箱单 / 报关单参考'
-  if (/一般贸易/.test(template ?? '')) return '发票 / 箱单 / 参考资料'
-  return '发票 / 箱单 / 参考资料'
+  if (/9710/i.test(template ?? '')) return '合同 / 发票 / 装箱单'
+  if (/一般贸易/.test(template ?? '')) return '合同 / 发票 / 箱单'
+  return '发票 / 箱单'
 }
 
 export function buildSubmissionPreview(declarationDraft) {

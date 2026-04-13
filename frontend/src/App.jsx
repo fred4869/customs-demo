@@ -192,7 +192,7 @@ export default function App() {
         <div className="page-header-main">
           <div className="page-header-left">
             <div className="page-header-title">
-              <h1>统一单证解析与报关单预览</h1>
+              <h1>原始单据解析与报关草单预览</h1>
             </div>
           </div>
           <nav className="page-step-nav" aria-label="页面步骤">
@@ -200,7 +200,7 @@ export default function App() {
               <span className="page-step-index">01</span>
               <span className="page-step-copy">
                 <strong>首页进度</strong>
-                <small>输入材料与流程概览</small>
+                <small>输入原始单据与流程概览</small>
               </span>
             </button>
             <button
@@ -211,7 +211,7 @@ export default function App() {
               <span className="page-step-index">02</span>
               <span className="page-step-copy">
                 <strong>文件预览与确认</strong>
-                <small>查看文件并处理待确认字段</small>
+                <small>查看原始单据并核对字段</small>
               </span>
             </button>
             <button
@@ -222,14 +222,14 @@ export default function App() {
               <span className="page-step-index">03</span>
               <span className="page-step-copy">
                 <strong>报关单预览</strong>
-                <small>查看统一报关单与模拟提交</small>
+                <small>生成草单并模拟提交</small>
               </span>
             </button>
           </nav>
         </div>
         <div className="header-meta">
           <span className="meta-chip">支持多格式文档</span>
-          <span className="meta-chip">统一报关单结构</span>
+          <span className="meta-chip">仅原始材料参与抽取</span>
         </div>
       </header>
 
@@ -242,7 +242,7 @@ export default function App() {
               <div className="section-heading">
                 <div>
                   <p className="section-index">01</p>
-                  <h2>材料输入与流程进度</h2>
+                  <h2>输入原始单据与流程进度</h2>
                 </div>
               </div>
 
@@ -253,7 +253,7 @@ export default function App() {
                       <span className="input-entry-label">方式 A</span>
                       <h3>上传本地文件</h3>
                     </div>
-                    <p className="muted input-entry-note">支持 PDF、Excel、Word，上传后直接进入解析流程。</p>
+                    <p className="muted input-entry-note">支持 PDF、Excel、Word。只把原始业务材料作为输入，报关单样例页不参与抽取。</p>
                     <label className="primary-button upload-button upload-button-wide">
                       选择本地文件
                       <input type="file" multiple onChange={handleUpload} />
@@ -267,7 +267,7 @@ export default function App() {
                       <span className="input-entry-label">方式 B</span>
                       <h3>使用现成 Demo</h3>
                     </div>
-                    <p className="muted input-entry-note">适合第一次演示，直接加载预制样例包。</p>
+                    <p className="muted input-entry-note">适合第一次演示。样例中的最后一页或报关单 sheet 仅作目标样式参考，不参与抽取。</p>
                     <details className="sample-dropdown">
                       <summary className="sample-dropdown-trigger">
                         <span>选择 Demo 样例包</span>
@@ -351,7 +351,7 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <EmptyState title="文件预览与确认" message="上传文件后，这里显示原始预览、抽取依据和待确认字段。" />
+                <EmptyState title="文件预览与确认" message="上传原始材料后，这里显示文件预览、抽取依据和待确认字段。参考样例页只用于对照，不参与抽取。" />
               )}
             </section>
           )}
@@ -361,12 +361,12 @@ export default function App() {
               <div className="section-heading">
                 <div>
                   <p className="section-index">03</p>
-                  <h2>统一报关单预览</h2>
+                  <h2>报关草单预览</h2>
                 </div>
               </div>
               <div className="subpage-tabs">
                 <button className={`subpage-tab ${deliveryTab === 'declaration' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('declaration')}>
-                  统一报关单
+                  报关草单
                 </button>
                 <button className={`subpage-tab ${deliveryTab === 'gateway' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('gateway')}>
                   模拟报关宝
@@ -374,7 +374,7 @@ export default function App() {
               </div>
               <div className="declaration-stack">
                 {deliveryTab === 'declaration'
-                  ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="统一报关单" message="完成解析后，这里会生成统一报关单结构。" />)
+                  ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="报关草单" message="完成原始材料解析后，这里会生成报关草单。" />)
                   : (state.submission_preview ? <SubmissionPreview preview={state.submission_preview} /> : <EmptyState title="模拟提交" message="生成报关单后，这里展示模拟关务宝提交效果。" />)}
               </div>
             </section>

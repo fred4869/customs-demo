@@ -298,25 +298,54 @@ function extractStructuredData({ fileId, sourceIndex, filename, documentType, te
     .split(/\r?\n/)
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean)
+  const extractionLines = buildExtractionLines(documentType, lines, workbook)
 
-  const lineItems = extractLineItems(documentType, lines, filename, workbook)
-  const header = buildHeaderCandidates(documentType, lines, filename, lineItems, workbook)
+  const lineItems = extractLineItems(documentType, extractionLines, filename, workbook)
+  const header = buildHeaderCandidates(documentType, extractionLines, filename, lineItems, workbook)
 
   return {
     file_id: fileId,
     source_index: sourceIndex,
     file_name: filename,
     document_type: documentType,
-    text_excerpt: isReadableExtractedText(text) ? normalizeWhitespace(text).slice(0, 800) : '',
-    raw_text: isReadableExtractedText(text) ? text : '',
+    text_excerpt: isReadableExtractedText(extractionLines.join('\n')) ? normalizeWhitespace(extractionLines.join('\n')).slice(0, 800) : '',
+    raw_text: isReadableExtractedText(extractionLines.join('\n')) ? extractionLines.join('\n') : '',
     header_candidates: header,
     line_items: lineItems,
-    evidence_blocks: lines
+    evidence_blocks: extractionLines
       .filter((line) => isReadableExtractedText(line))
       .filter((line) => !/^[_\-=]{10,}$/.test(line))
       .slice(0, 30)
       .map((line, index) => ({ id: `${fileId}:line:${index + 1}`, text: line }))
   }
+}
+
+function buildExtractionLines(documentType, lines, workbook) {
+  if (documentType === DOC_TYPES.reference && isStructured9710Workbook(workbook)) {
+    return build9710SourceLines(workbook)
+  }
+
+  if (documentType === DOC_TYPES.reference) {
+    const declarationIndex = lines.findIndex((line) => /中华人民共和国海关出口货物报关单|出口货物报关单（最新版）/i.test(line))
+    if (declarationIndex > 0) {
+      return lines.slice(0, declarationIndex)
+    }
+  }
+
+  return lines
+}
+
+function build9710SourceLines(workbook) {
+  const sourceSheets = ['合同', '发票', '装箱单']
+    .map((name) => getWorkbookSheet(workbook, name))
+    .filter(Boolean)
+
+  return sourceSheets.flatMap((sheet) => [
+    `# ${sheet.name}`,
+    ...sheet.rows
+      .map((row) => row.map((cell) => normalizeWhitespace(cell)).filter(Boolean).join(' | '))
+      .filter(Boolean)
+  ])
 }
 
 function buildHeaderCandidates(documentType, lines, filename, lineItems = [], workbook = null) {
@@ -356,11 +385,11 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
   }
 
   if (documentType === DOC_TYPES.reference) {
-    applyReferenceDeclarationHeaderCandidates(header, normalizedLines)
+    applyReferenceSourceHeaderCandidates(header, normalizedLines)
   }
 
   pushCandidate(header.declaration_template, documentType === DOC_TYPES.reference ? '历史报关模板' : '统一报关单', 0.7, fileNameText)
-  if (documentType === DOC_TYPES.reference && /\bexport\b(?!-control)|出口|9710|by sea|from ningbo port/i.test(text)) {
+  if (documentType === DOC_TYPES.reference && /\bexport\b(?!-control)|出口|9710|by sea|from ningbo port|\bfca\b|\bcontract\b/i.test(text)) {
     pushCandidate(header.import_export_flag, 'export', 0.72, text.slice(0, 160))
   } else if (/import|进口|入保税区|保税区/i.test(text + fileNameText)) {
     pushCandidate(header.import_export_flag, 'import', 0.72, text.slice(0, 160))
@@ -464,62 +493,6 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
   return header
 }
 
-function applyReferenceDeclarationHeaderCandidates(header, lines) {
-  const declarationIndex = lines.findIndex((line) => /中华人民共和国海关出口货物报关单/i.test(line))
-  if (declarationIndex < 0) return
-
-  const declarationLines = lines.slice(declarationIndex, declarationIndex + 40)
-  const declarationText = declarationLines.join('\n')
-
-  const contractNo = matchText(declarationText, [/合同协议号\s+件数\s+包装种类\s+毛重.*\n([A-Z0-9-]+)\s+/i, /Contract NO\.?\s*[:：]?\s*([A-Z0-9-]+)/i])
-  if (contractNo) pushCandidate(header.contract_no, contractNo, 0.95, '报关单页')
-
-  const packageSummary = declarationLines.find((line) => /合同协议号.*件数.*包装种类.*毛重.*净重/i.test(line))
-  if (packageSummary) {
-    const nextLine = declarationLines[declarationLines.indexOf(packageSummary) + 1] || ''
-    const matched = nextLine.match(/^([A-Z0-9-]+)\s+(\d+)\s+(\S+)\s+([\d.,]+)\s+([\d.,]+)/)
-    if (matched) {
-      pushCandidate(header.package_count, parseNumber(matched[2]), 0.95, nextLine)
-      pushCandidate(header.package_type, matched[3], 0.94, nextLine)
-      pushCandidate(header.gross_weight_kg, parseNumber(matched[4]), 0.94, nextLine)
-      pushCandidate(header.net_weight_kg, parseNumber(matched[5]), 0.94, nextLine)
-    }
-  }
-
-  const modeLineIndex = declarationLines.findIndex((line) => /申报单位\s+监管方式\s+征免性质\s+备案号/i.test(line))
-  if (modeLineIndex >= 0) {
-    const nextLine = declarationLines[modeLineIndex + 1] || ''
-    const parts = nextLine.split(/\s+/).filter(Boolean)
-    if (parts[0]) pushCandidate(header.supervision_mode, parts[0], 0.92, nextLine)
-    if (parts[1]) pushCandidate(header.levy_nature, parts[1], 0.92, nextLine)
-  }
-
-  const routeLineIndex = declarationLines.findIndex((line) => /贸易国\(地区\)\s+运抵国\(地区\)\s+指运港\s+境内货源地/i.test(line))
-  if (routeLineIndex >= 0) {
-    const nextLine = declarationLines[routeLineIndex + 1] || ''
-    const parts = nextLine.split(/\s+/).filter(Boolean)
-    if (parts[0]) pushCandidate(header.trade_country, maybeCountry(parts[0]), 0.9, nextLine)
-    if (parts[1]) pushCandidate(header.destination_country, maybeCountry(parts[1]), 0.9, nextLine)
-  }
-
-  const transportLineIndex = declarationLines.findIndex((line) => /生产销售单位\s+运输方式\s+运输工具名称\s+提运单号/i.test(line))
-  if (transportLineIndex >= 0) {
-    const nextLine = declarationLines[transportLineIndex + 1] || ''
-    if (nextLine) {
-      const mode = /海运/.test(nextLine) ? 'SEA' : /空运/.test(nextLine) ? 'AIR' : null
-      if (mode) pushCandidate(header.transport_mode, mode, 0.9, nextLine)
-    }
-  }
-
-  const inco = matchText(declarationText, [/许可证号\s+成交方式\s+运费\s+保费\s+杂费\s*\n([A-Z]{3})/i])
-  if (inco) pushCandidate(header.terms_of_delivery, inco, 0.9, '报关单页')
-
-  const marksIdx = declarationLines.findIndex((line) => /标记唛码及备注/i.test(line))
-  if (marksIdx >= 0 && declarationLines[marksIdx + 1]) {
-    pushCandidate(header.marks_remarks, declarationLines[marksIdx + 1], 0.88, '报关单页')
-  }
-}
-
 function extractTotalAmount(lines, text) {
   for (const line of lines) {
     if (!/\btotal\b/i.test(line)) continue
@@ -621,8 +594,8 @@ function extractLineItems(documentType, lines, filename, workbook = null) {
   }
 
   if (documentType === DOC_TYPES.reference) {
-    const declarationItems = extractReferenceDeclarationItems(lines)
-    if (declarationItems.length) return declarationItems
+    const sourceTradeItems = extractReferenceSourceTradeItems(lines)
+    if (sourceTradeItems.length) return sourceTradeItems
 
     const tradeItems = extractReferenceTradeItems(lines)
     if (tradeItems.length) return tradeItems
@@ -858,6 +831,101 @@ function extractReferenceTradeItems(lines) {
   return items
 }
 
+function applyReferenceSourceHeaderCandidates(header, lines) {
+  const text = lines.join('\n')
+  const contractNo = matchText(text, [/Contract NO\.?\s*[:：]?\s*([A-Z0-9-]+)/i])
+  if (contractNo) pushCandidate(header.contract_no, contractNo, 0.93, '合同页')
+
+  const inco = extractInco(lines, text)
+  if (inco) pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.82, inco)
+
+  const totalLine = lines.find((line) => /^Total\s+\d+\s+Packages?\s+/i.test(line))
+  if (totalLine) {
+    const matched = totalLine.match(/^Total\s+(\d+)\s+Packages?\s+([\d.,]+)\s+([\d.,]+)(?:\s+[\d.,]+)?$/i)
+    if (matched) {
+      pushCandidate(header.package_count, parseNumber(matched[1]), 0.9, totalLine)
+      pushCandidate(header.gross_weight_kg, parseNumber(matched[2]), 0.88, totalLine)
+      pushCandidate(header.net_weight_kg, parseNumber(matched[3]), 0.88, totalLine)
+    }
+  }
+}
+
+function extractReferenceSourceTradeItems(lines) {
+  const startIndex = lines.findIndex((line) => /item products specification quantity unit price total price/i.test(line))
+  if (startIndex < 0) return []
+
+  const items = []
+  let index = startIndex + 1
+  while (index < lines.length) {
+    const line = normalizeWhitespace(lines[index])
+    if (!line) {
+      index += 1
+      continue
+    }
+    if (/^contract$/i.test(line)) break
+    const inlineItem = line.match(/^(\d+)\s+(.+)$/)
+    if (!/^\d+$/.test(line) && !inlineItem) {
+      index += 1
+      continue
+    }
+
+    const lineNo = Number(inlineItem?.[1] ?? line)
+    index += 1
+    const descriptionLines = inlineItem?.[2] ? [inlineItem[2]] : []
+    let quantityLine = null
+
+    while (index < lines.length) {
+      const current = normalizeWhitespace(lines[index])
+      if (!current) {
+        index += 1
+        continue
+      }
+      if (/^\d+(?:\.\d+)?\s+[A-Za-z]+\s+US\$/i.test(current)) {
+        quantityLine = current
+        index += 1
+        break
+      }
+      const inlineQty = current.match(/^(.*?)\s+(\d+(?:\.\d+)?)\s+([A-Za-z]+)\s+US\$([\d,]+(?:\.\d+)?)\s+US\$([\d,]+(?:\.\d+)?)$/i)
+      if (inlineQty) {
+        if (inlineQty[1]) descriptionLines.push(normalizeWhitespace(inlineQty[1]))
+        quantityLine = `${inlineQty[2]} ${inlineQty[3]} US$${inlineQty[4]} US$${inlineQty[5]}`
+        index += 1
+        break
+      }
+      if (/^\d+$/.test(current) || /^\d+\s+.+$/.test(current) || /^contract$/i.test(current)) break
+      descriptionLines.push(current)
+      index += 1
+    }
+
+    if (!descriptionLines.length || !quantityLine) continue
+
+    const qtyMatch = quantityLine.match(/^(\d+(?:\.\d+)?)\s+([A-Za-z]+)\s+US\$([\d,]+(?:\.\d+)?)\s+US\$([\d,]+(?:\.\d+)?)$/i)
+    if (!qtyMatch) continue
+
+    const [, qtyRaw, unitRaw, unitPriceRaw, lineAmountRaw] = qtyMatch
+    const productName = descriptionLines[0]
+    const specModel = normalizeWhitespace(descriptionLines.join(' | '))
+
+    items.push({
+      line_no: lineNo,
+      product_code: null,
+      product_name_cn: containsChinese(productName) ? productName : null,
+      product_name_en: !containsChinese(productName) ? productName : null,
+      spec_model: specModel,
+      hs_code: null,
+      declared_qty: parseNumber(qtyRaw),
+      declared_unit: normalizeUnit(unitRaw),
+      unit_price: parseLooseNumber(unitPriceRaw),
+      line_amount: parseLooseNumber(lineAmountRaw),
+      origin_country: null,
+      destination_country: null,
+      source_documents: []
+    })
+  }
+
+  return items
+}
+
 function mergeSupplement(extraction, llmSupplement, sourcePath) {
   const document = {
     ...extraction,
@@ -1017,137 +1085,95 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
     marks_remarks: []
   }
 
-  const declarationSheet = getWorkbookSheet(workbook, '报关单')
   const packingSheet = getWorkbookSheet(workbook, '装箱单')
-  const invoiceSheet = getWorkbookSheet(workbook, '发票') ?? getWorkbookSheet(workbook, '合同')
+  const invoiceSheet = getWorkbookSheet(workbook, '发票')
+  const contractSheet = getWorkbookSheet(workbook, '合同')
+  const sourceSheet = invoiceSheet ?? contractSheet
 
-  pushCandidate(header.import_export_flag, 'export', 0.98, '报关单')
-  pushCandidate(header.declaration_template, '9710参考模板', 0.98, filename)
+  pushCandidate(header.import_export_flag, 'export', 0.9, '合同/发票')
+  pushCandidate(header.declaration_template, '9710原始材料', 0.92, filename)
 
-  const contractNo = normalizeWhitespace(cellAt(declarationSheet, 9, 0))
-  if (contractNo) pushCandidate(header.contract_no, contractNo, 0.97, '报关单')
+  const contractNo = extractWorkbookContractNo(sourceSheet)
+  if (contractNo) pushCandidate(header.contract_no, contractNo, 0.96, '合同/发票')
 
-  const customsOffice = normalizeWhitespace(cellAt(declarationSheet, 3, 8))
-  if (customsOffice) pushCandidate(header.customs_office, customsOffice, 0.95, '报关单')
+  const routeLine = find9710RouteLine(sourceSheet)
+  if (/by sea/i.test(routeLine)) pushCandidate(header.transport_mode, 'SEA', 0.88, routeLine)
 
-  const filingNo = normalizeWhitespace(cellAt(declarationSheet, 3, 20))
-  if (filingNo) pushCandidate(header.filing_no, filingNo, 0.95, '报关单')
-
-  const transportMode = normalizeWhitespace(cellAt(declarationSheet, 5, 8))
-  if (transportMode) {
-    pushCandidate(header.transport_mode, transportMode.includes('海') ? 'SEA' : transportMode, 0.95, '报关单')
+  const destinationCountry = extract9710DestinationCountry(routeLine)
+  if (destinationCountry) {
+    pushCandidate(header.trade_country, destinationCountry, 0.84, routeLine)
+    pushCandidate(header.destination_country, destinationCountry, 0.84, routeLine)
   }
 
-  const supervisionMode = normalizeWhitespace(cellAt(declarationSheet, 7, 8))
-  if (supervisionMode) pushCandidate(header.supervision_mode, supervisionMode, 0.97, '报关单')
+  if (/ningbo port/i.test(routeLine)) {
+    pushCandidate(header.departure_port, '宁波', 0.82, routeLine)
+  }
 
-  const levyNature = normalizeWhitespace(cellAt(declarationSheet, 7, 12))
-  if (levyNature) pushCandidate(header.levy_nature, levyNature, 0.97, '报关单')
+  pushCandidate(header.origin_country, maybeCountry('china'), 0.8, '合同/装箱单')
 
-  const tradeCountry = maybeCountry(cellAt(declarationSheet, 9, 8) || '')
-  const destinationCountry = maybeCountry(cellAt(declarationSheet, 9, 12) || '')
-  if (tradeCountry) pushCandidate(header.trade_country, tradeCountry, 0.96, '报关单')
-  if (destinationCountry) pushCandidate(header.destination_country, destinationCountry, 0.96, '报关单')
-  if (lineItems[0]?.origin_country) pushCandidate(header.origin_country, lineItems[0].origin_country, 0.94, '报关单商品行')
+  const packingTotals = extract9710PackingTotals(packingSheet)
+  if (packingTotals.package_count !== null) pushCandidate(header.package_count, packingTotals.package_count, 0.94, '装箱单 TOTAL')
+  if (packingTotals.gross_weight_kg !== null) pushCandidate(header.gross_weight_kg, packingTotals.gross_weight_kg, 0.94, '装箱单 TOTAL')
+  if (packingTotals.net_weight_kg !== null) pushCandidate(header.net_weight_kg, packingTotals.net_weight_kg, 0.94, '装箱单 TOTAL')
+  if (packingTotals.package_type) pushCandidate(header.package_type, packingTotals.package_type, 0.88, '装箱单 CTN')
 
-  const packageCell = normalizeWhitespace(cellAt(declarationSheet, 11, 8))
-  const packageCount = packageCell ? parseNumber(packageCell.replace(/[^\d.]/g, '')) : null
-  if (packageCount !== null) pushCandidate(header.package_count, Math.round(packageCount), 0.97, '报关单')
-  const grossWeight = parseNumber(cellAt(declarationSheet, 11, 10))
-  const netWeight = parseNumber(cellAt(declarationSheet, 11, 12))
-  if (grossWeight !== null) pushCandidate(header.gross_weight_kg, round2(grossWeight), 0.97, '报关单')
-  if (netWeight !== null) pushCandidate(header.net_weight_kg, round2(netWeight), 0.97, '报关单')
+  const inco = extractWorkbookInco(sourceSheet)
+  if (inco) pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.92, '合同/发票')
 
-  const inco = normalizeWhitespace(cellAt(declarationSheet, 11, 14))
-  if (inco) pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.96, '报关单')
-
-  const invoiceTotal = extractWorkbookTotal(invoiceSheet)
+  const invoiceTotal = extractWorkbookTotal(invoiceSheet ?? contractSheet)
   const derivedTotal = lineItems.length ? round2(lineItems.reduce((sum, item) => sum + (parseNumber(item.line_amount) ?? 0), 0)) : null
   const totalAmount = invoiceTotal ?? derivedTotal
-  if (totalAmount !== null) pushCandidate(header.total_amount, totalAmount, 0.96, '发票/报关单商品行')
+  if (totalAmount !== null) pushCandidate(header.total_amount, totalAmount, 0.94, '发票商品行')
 
-  const currency = normalizeWorkbookCurrency(cellAt(declarationSheet, 17, 16)) ?? 'USD'
-  pushCandidate(header.currency, currency, 0.95, '报关单商品行')
+  const currency = detectWorkbookCurrency(sourceSheet) ?? 'USD'
+  pushCandidate(header.currency, currency, 0.9, '发票')
 
-  const seller = extractWorkbookSeller(invoiceSheet)
+  const seller = extractWorkbookSeller(sourceSheet)
   if (seller) pushCandidate(header.overseas_consignor, seller, 0.72, '合同/发票')
-
-  const marksRemarks = normalizeWhitespace(cellAt(declarationSheet, 15, 0))
-  if (marksRemarks) pushCandidate(header.marks_remarks, marksRemarks, 0.95, '报关单')
 
   const packingCountry = normalizeWhitespace(cellAt(packingSheet, 5, 0))
   if (packingCountry && /china/i.test(packingCountry)) {
     pushCandidate(header.origin_country, maybeCountry('china'), 0.86, '装箱单')
   }
 
-  const routeLine = find9710RouteLine(invoiceSheet)
-  if (/ningbo port/i.test(routeLine)) {
-    pushCandidate(header.departure_port, '宁波', 0.72, routeLine)
-  }
-
-  if (sheetHasCartons(packingSheet)) {
-    pushCandidate(header.package_type, '纸箱', 0.74, '装箱单 CTN')
+  const marksRemarks = extract9710ShippingMarks(packingSheet)
+  if (marksRemarks) {
+    pushCandidate(header.marks_remarks, marksRemarks, 0.84, '装箱单 SHIPPING MARKS')
   }
 
   return header
 }
 
 function extract9710WorkbookLineItems(workbook) {
-  const declarationSheet = getWorkbookSheet(workbook, '报关单')
   const sourceItems = extract9710SourceTradeItems(workbook)
-  if (!declarationSheet?.rows?.length) return []
+  if (!sourceItems.length) return []
+
+  const routeLine = find9710RouteLine(getWorkbookSheet(workbook, '发票') ?? getWorkbookSheet(workbook, '合同'))
+  const destinationCountry = extract9710DestinationCountry(routeLine)
+  const originCountry = maybeCountry('china')
 
   const items = []
-  for (const row of declarationSheet.rows) {
-    const lineNo = normalizeWhitespace(row?.[0])
-    if (!/^\d{2}$/.test(lineNo)) continue
-
-    const hsCode = normalizeWhitespace(row?.[1])
-    const productName = normalizeWhitespace(row?.[3])
-    const qtyCell = normalizeWhitespace(row?.[8])
-    const { qty, unit } = parseWorkbookQuantityUnit(qtyCell)
-    const unitPrice = parseNumber(row?.[11])
-    const lineAmount = parseNumber(row?.[13])
-    const currency = normalizeWorkbookCurrency(row?.[16])
-    const originCountry = maybeCountry(row?.[18] ?? '')
-    const destinationCountry = maybeCountry(row?.[20] ?? '')
-    const sourceRegion = normalizeWhitespace(row?.[22])
-
-    if (!hsCode && !productName && qty === null && lineAmount === null) continue
-
-    const sourceItem = sourceItems.find((candidate, index) => (
-      index === items.length ||
-      (candidate.declared_qty !== null && qty !== null && Number(candidate.declared_qty) === Number(qty))
-    ))
+  for (const sourceItem of sourceItems) {
     const sourceCategory = inferUmbrellaCategory(sourceItem?.raw_description || '')
-    const declarationCategory = inferUmbrellaCategory(productName)
-    const preferredChineseName = sourceCategory?.cn || declarationCategory?.cn || productName || null
+    const preferredChineseName = sourceCategory?.cn || sourceItem.summary_description || null
     const preferredEnglishName = sourceCategory?.en || null
-    const preferredSpec = normalizeWhitespace(
-      sourceItem?.summary_description ||
-      sourceItem?.raw_description ||
-      productName ||
-      hsCode
-    )
-
-    const declarationElements = normalizeWhitespace(cellAt(declarationSheet, 19 + (items.length * 3), 0))
-
+    const preferredSpec = normalizeWhitespace(sourceItem?.summary_description || sourceItem?.raw_description || '')
     items.push({
-      line_no: Number(lineNo),
-      product_code: hsCode || null,
+      line_no: items.length + 1,
+      product_code: null,
       product_name_cn: preferredChineseName,
       product_name_en: preferredEnglishName,
-      spec_model: preferredSpec || hsCode || null,
-      hs_code: hsCode || null,
-      declared_qty: qty,
-      declared_unit: normalizeUnit(unit || '把'),
-      unit_price: unitPrice,
-      line_amount: lineAmount,
-      currency,
+      spec_model: preferredSpec || null,
+      hs_code: null,
+      declared_qty: sourceItem.declared_qty,
+      declared_unit: normalizeUnit(sourceItem.declared_unit || '把'),
+      unit_price: sourceItem.unit_price,
+      line_amount: sourceItem.line_amount,
+      currency: 'USD',
       origin_country: originCountry,
       destination_country: destinationCountry,
-      source_region: sourceRegion || null,
-      declaration_elements: declarationElements || null,
+      source_region: null,
+      declaration_elements: null,
       source_documents: []
     })
   }
@@ -1179,6 +1205,73 @@ function extract9710SourceTradeItems(workbook) {
     })
   }
   return items
+}
+
+function extractWorkbookContractNo(sheet) {
+  if (!sheet?.rows?.length) return null
+  for (const row of sheet.rows) {
+    const text = normalizeWhitespace(row.join(' '))
+    const matched = text.match(/invoice:\s*([A-Z0-9-]+)/i)
+    if (matched?.[1]) return matched[1]
+  }
+  return null
+}
+
+function extractWorkbookInco(sheet) {
+  const routeLine = find9710RouteLine(sheet)
+  if (/by sea/i.test(routeLine)) return 'FOB'
+  return null
+}
+
+function detectWorkbookCurrency(sheet) {
+  return extractWorkbookTotalSayCurrency(sheet) ?? 'USD'
+}
+
+function extractWorkbookTotalSayCurrency(sheet) {
+  if (!sheet?.rows?.length) return null
+  for (const row of sheet.rows) {
+    const text = normalizeWhitespace(row.join(' '))
+    if (/u\.s\.dollars/i.test(text)) return 'USD'
+    if (/人民币/i.test(text)) return 'CNY'
+  }
+  return null
+}
+
+function extract9710DestinationCountry(routeLine = '') {
+  const matched = String(routeLine).match(/to\s+(.+?)\s+by sea/i)
+  if (!matched?.[1]) return null
+  return maybeCountry(matched[1])
+}
+
+function extract9710PackingTotals(sheet) {
+  const totals = {
+    package_count: null,
+    gross_weight_kg: null,
+    net_weight_kg: null,
+    package_type: null
+  }
+  if (!sheet?.rows?.length) return totals
+  const totalRow = sheet.rows.find((row) => /^TOTAL:?$/i.test(normalizeWhitespace(row?.[0])))
+  if (totalRow) {
+    totals.package_count = parseNumber(totalRow?.[5]) !== null ? Math.round(parseNumber(totalRow?.[5])) : null
+    totals.net_weight_kg = parseNumber(totalRow?.[6]) !== null ? round2(parseNumber(totalRow?.[6])) : null
+    totals.gross_weight_kg = parseNumber(totalRow?.[8]) !== null ? round2(parseNumber(totalRow?.[8])) : null
+  }
+  if (sheetHasCartons(sheet)) totals.package_type = '纸箱'
+  return totals
+}
+
+function extract9710ShippingMarks(sheet) {
+  if (!sheet?.rows?.length) return null
+  const marks = sheet.rows
+    .slice(1)
+    .map((row) => normalizeWhitespace(row?.[0]))
+    .filter(Boolean)
+    .filter((value) => !/^shipping marks$/i.test(value))
+    .filter((value) => !/^from:/i.test(value))
+    .filter((value) => !/^total:?$/i.test(value))
+  const unique = [...new Set(marks)]
+  return unique.length ? unique.join('，') : null
 }
 
 function inferUmbrellaCategory(value = '') {
