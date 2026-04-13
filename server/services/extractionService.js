@@ -912,6 +912,7 @@ function extractReferenceSourceTradeItems(lines) {
       product_name_cn: containsChinese(productName) ? productName : null,
       product_name_en: !containsChinese(productName) ? productName : null,
       spec_model: specModel,
+      declaration_elements: specModel,
       hs_code: null,
       declared_qty: parseNumber(qtyRaw),
       declared_unit: normalizeUnit(unitRaw),
@@ -1173,7 +1174,7 @@ function extract9710WorkbookLineItems(workbook) {
       origin_country: originCountry,
       destination_country: destinationCountry,
       source_region: null,
-      declaration_elements: null,
+      declaration_elements: preferredSpec || null,
       source_documents: []
     })
   }

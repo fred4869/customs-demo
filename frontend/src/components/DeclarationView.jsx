@@ -8,7 +8,7 @@ const HEADER_LAYOUT = [
   ],
   [
     { label: '境外收货人', field: 'overseas_consignor', span: 8 },
-    { label: '运输方式', field: 'transport_mode', span: 4 },
+    { label: '运输方式', field: 'transport_mode', span: 4, emptyText: '待确认' },
     { label: '运输工具名称及航次号', field: 'transport_name', span: 8 },
     { label: '提运单号', field: 'bill_no', span: 4 }
   ],
@@ -21,7 +21,7 @@ const HEADER_LAYOUT = [
   [
     { label: '合同协议号', field: 'contract_no', span: 8 },
     { label: '贸易国(地区)', field: 'trade_country', span: 4 },
-    { label: '运抵国(地区)', field: 'destination_country', span: 4 },
+    { label: '运抵国(地区)', field: 'destination_country', span: 4, emptyText: '待确认' },
     { label: '指运港', field: 'destination_port', span: 4 },
     { label: '离境口岸', field: 'departure_port', span: 4 }
   ],
@@ -153,6 +153,7 @@ function FragmentRow({ item, draft }) {
       <td className="sheet-goods-cell">
         <div>{item.product_name_cn || item.product_name_en || ''}</div>
         <small>{item.spec_model || item.product_name_en || ''}</small>
+        {item.declaration_elements ? <small>申报要素：{item.declaration_elements}</small> : null}
       </td>
       <td>{formatSheetQuantity(item.declared_qty, item.declared_unit)}</td>
       <td>{formatNumber(item.unit_price)}</td>
@@ -178,7 +179,7 @@ function resolveSheetCellValue(header, item) {
   const value = header?.[item.field]
   if (value !== null && value !== undefined && value !== '') return formatDisplayValue(value)
   if (item.fallbackField) return formatDisplayValue(header?.[item.fallbackField])
-  return ''
+  return item.emptyText || ''
 }
 
 function padLineNo(value) {
