@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import DeclarationView from './components/DeclarationView'
 import DocumentEvidence from './components/DocumentEvidence'
 import DocumentList from './components/DocumentList'
@@ -37,6 +37,8 @@ export default function App() {
   const [activeSamplePacketId, setActiveSamplePacketId] = useState(null)
   const [uploadedPreviewFiles, setUploadedPreviewFiles] = useState([])
   const [activeWorkflowIndex, setActiveWorkflowIndex] = useState(0)
+  const [sampleDropdownOpen, setSampleDropdownOpen] = useState(false)
+  const sampleDropdownRef = useRef(null)
 
   useEffect(() => {
     fetchSamplePackets().then(setSamplePackets).catch((err) => setError(err.message))
@@ -49,6 +51,17 @@ export default function App() {
   useEffect(() => {
     setActiveWorkflowIndex(0)
   }, [state.workflow])
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!sampleDropdownRef.current?.contains(event.target)) {
+        setSampleDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [])
 
   const openIssues = state.normalized_record?.open_issues || []
   const selectedDocument = state.documents.find((document) => document.file_id === selectedDocumentId) || state.documents[0] || null
@@ -127,6 +140,7 @@ export default function App() {
   }
 
   async function handleSample(id) {
+    setSampleDropdownOpen(false)
     setActiveSamplePacketId(id)
     setUploadedPreviewFiles((current) => {
       current.forEach((item) => URL.revokeObjectURL(item.url))
@@ -261,8 +275,14 @@ export default function App() {
                       <h3>使用样例材料</h3>
                     </div>
                     <p className="muted input-entry-note">可直接载入样例材料查看处理效果。</p>
-                    <details className="sample-dropdown">
-                      <summary className="sample-dropdown-trigger">
+                    <details className="sample-dropdown" open={sampleDropdownOpen} ref={sampleDropdownRef}>
+                      <summary
+                        className="sample-dropdown-trigger"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setSampleDropdownOpen((current) => !current)
+                        }}
+                      >
                         <span>选择样例材料</span>
                         <small>{samplePackets.length} 个可选</small>
                       </summary>
