@@ -66,6 +66,7 @@ export default function App() {
   const openIssues = state.normalized_record?.open_issues || []
   const selectedDocument = state.documents.find((document) => document.file_id === selectedDocumentId) || state.documents[0] || null
   const workflowItems = state.workflow.length ? state.workflow : workflowSkeleton
+  const activeSamplePacket = samplePackets.find((item) => item.id === activeSamplePacketId) || null
 
   const previewSource = useMemo(() => {
     if (!selectedDocument) return null
@@ -140,7 +141,6 @@ export default function App() {
   }
 
   async function handleSample(id) {
-    setSampleDropdownOpen(false)
     setActiveSamplePacketId(id)
     setUploadedPreviewFiles((current) => {
       current.forEach((item) => URL.revokeObjectURL(item.url))
@@ -283,12 +283,17 @@ export default function App() {
                           setSampleDropdownOpen((current) => !current)
                         }}
                       >
-                        <span>选择样例材料</span>
-                        <small>{samplePackets.length} 个可选</small>
+                        <span>{activeSamplePacket ? `当前样例：${activeSamplePacket.label}` : '选择样例材料'}</span>
+                        <small>{activeSamplePacket ? '点击切换' : `${samplePackets.length} 个可选`}</small>
                       </summary>
                       <div className="sample-dropdown-list">
                         {samplePackets.map((packet, index) => (
-                          <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
+                          <button
+                            key={packet.id}
+                            className={`sample-card sample-card-inline ${activeSamplePacketId === packet.id ? 'sample-card-active' : ''}`}
+                            onClick={() => handleSample(packet.id)}
+                            disabled={loading}
+                          >
                             <strong>{packet.label}</strong>
                             <span>{packet.description}</span>
                           </button>
