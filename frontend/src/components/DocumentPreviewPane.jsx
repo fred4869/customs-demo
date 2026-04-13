@@ -91,6 +91,10 @@ export default function DocumentPreviewPane({ document, previewSource }) {
 
       <div className="preview-file-name">{displayFilename(document.file_name)}</div>
 
+      {document.document_type === 'declaration_reference' && (
+        <p className="muted preview-note">当前文件中的报关单页或报关单 sheet 仅作目标样式参考，不参与字段抽取。</p>
+      )}
+
       {fileType === 'pdf' && previewSource?.url && (
         <div className="pdf-preview-shell">
           <div className="pdf-preview-toolbar">

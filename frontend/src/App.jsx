@@ -18,13 +18,10 @@ const emptyState = {
 }
 
 const workflowSkeleton = [
-  { title: '文件接收', status: 'pending' },
-  { title: '文档分类', status: 'pending' },
-  { title: '文档解析', status: 'pending' },
-  { title: '字段标准化', status: 'pending' },
-  { title: '字段归并决策', status: 'pending' },
-  { title: '异常确认', status: 'pending' },
-  { title: '报关单生成', status: 'pending' },
+  { title: '材料接收', status: 'pending' },
+  { title: '材料解析', status: 'pending' },
+  { title: '字段校验', status: 'pending' },
+  { title: '草单生成', status: 'pending' },
   { title: '模拟提交', status: 'pending' }
 ]
 
@@ -169,7 +166,7 @@ export default function App() {
   function handleWorkflowClick(node, index) {
     setActiveWorkflowIndex(index)
 
-    if (/报关单生成/.test(node.title)) {
+    if (/草单生成|报关单生成/.test(node.title)) {
       setDeliveryTab('declaration')
       setActivePage('declaration')
       return
@@ -228,7 +225,7 @@ export default function App() {
           </nav>
         </div>
         <div className="header-meta">
-          <span className="meta-chip">支持多格式文档</span>
+          <span className="meta-chip">一般贸易主场景</span>
           <span className="meta-chip">仅原始材料参与抽取</span>
         </div>
       </header>
@@ -267,16 +264,16 @@ export default function App() {
                       <span className="input-entry-label">方式 B</span>
                       <h3>使用现成 Demo</h3>
                     </div>
-                    <p className="muted input-entry-note">适合第一次演示。样例中的最后一页或报关单 sheet 仅作目标样式参考，不参与抽取。</p>
+                    <p className="muted input-entry-note">默认推荐一般贸易主样例。9710 和施耐德仅作参考展示，最后一页或报关单 sheet 不参与抽取。</p>
                     <details className="sample-dropdown">
                       <summary className="sample-dropdown-trigger">
                         <span>选择 Demo 样例包</span>
                         <small>{samplePackets.length} 个可选</small>
                       </summary>
                       <div className="sample-dropdown-list">
-                        {samplePackets.map((packet) => (
+                        {samplePackets.map((packet, index) => (
                           <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
-                            <strong>{packet.label}</strong>
+                            <strong>{packet.label}{index === 0 ? ' · 推荐' : ''}</strong>
                             <span>{packet.description}</span>
                           </button>
                         ))}
