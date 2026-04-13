@@ -170,7 +170,12 @@ function resolveCellValue(header, item) {
   if (item.value !== undefined) return item.value
   const value = header?.[item.field]
   if (value !== null && value !== undefined && value !== '') return formatValue(value)
-  if (item.fallbackField) return formatValue(header?.[item.fallbackField])
+  if (item.fallbackField) {
+    const fallbackValue = header?.[item.fallbackField]
+    if (fallbackValue !== null && fallbackValue !== undefined && fallbackValue !== '') {
+      return formatValue(fallbackValue)
+    }
+  }
   return '待确认'
 }
 
@@ -178,7 +183,12 @@ function resolveSheetCellValue(header, item) {
   if (item.value !== undefined) return item.value
   const value = header?.[item.field]
   if (value !== null && value !== undefined && value !== '') return formatDisplayValue(value)
-  if (item.fallbackField) return formatDisplayValue(header?.[item.fallbackField])
+  if (item.fallbackField) {
+    const fallbackValue = header?.[item.fallbackField]
+    if (fallbackValue !== null && fallbackValue !== undefined && fallbackValue !== '') {
+      return formatDisplayValue(fallbackValue)
+    }
+  }
   return item.emptyText || '待确认'
 }
 
