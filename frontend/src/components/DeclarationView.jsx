@@ -40,8 +40,8 @@ export default function DeclarationView({ draft }) {
   return (
     <section className="panel declaration-sheet-panel">
       <div className="panel-header">
-        <h3>草单预览</h3>
-        <span className="pill">按出口货物报关单样式展示</span>
+        <h3>报关草单</h3>
+        <span className="pill">出口货物报关单样式</span>
       </div>
 
       <div className="declaration-sheet declaration-sheet-reference">
@@ -133,10 +133,9 @@ export default function DeclarationView({ draft }) {
 
         <div className="sheet-footer sheet-footer-reference">
           <div className="sheet-footer-row">
-            <span>录入状态: {draft.validation.status === 'pass' ? '已生成' : '待补充'}</span>
-            <span>录入条数: {draft.items?.length || 0}</span>
-            <span>成交方式: {formatDisplayValue(draft.header?.terms_of_delivery)}</span>
-            <span>币制: {formatDisplayValue(draft.header?.currency)}</span>
+            <span>商品条数: {draft.items?.length || 0}</span>
+            <span>成交方式: {formatDisplayValue(draft.header?.terms_of_delivery) || '待确认'}</span>
+            <span>币制: {formatDisplayValue(draft.header?.currency) || '待确认'}</span>
           </div>
           <div className="sheet-stamp">报关专用章</div>
         </div>
@@ -153,7 +152,6 @@ function FragmentRow({ item, draft }) {
       <td className="sheet-goods-cell">
         <div>{item.product_name_cn || item.product_name_en || ''}</div>
         <small>{item.spec_model || item.product_name_en || ''}</small>
-        {item.declaration_elements ? <small>申报要素：{item.declaration_elements}</small> : null}
       </td>
       <td>{formatSheetQuantity(item.declared_qty, item.declared_unit)}</td>
       <td>{formatNumber(item.unit_price)}</td>

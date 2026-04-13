@@ -45,8 +45,8 @@ export default function DocumentEvidence({ document, compact = false }) {
         ))}
         {!(document.evidence_blocks || []).filter((block) => isReadableSnippet(block.text)).length && (
           <article className="evidence-card">
-            <small>系统提示</small>
-            <p>当前文件未抽取到适合直接展示的文本片段，页面以原始文件预览为主。</p>
+            <small>说明</small>
+            <p>当前文件没有可直接展示的文本片段，请以上方文件预览为准。</p>
           </article>
         )}
       </div>

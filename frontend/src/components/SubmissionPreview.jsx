@@ -20,11 +20,11 @@ export default function SubmissionPreview({ preview }) {
     <section className="panel gateway-shell">
       <div className="gateway-topbar">
         <div>
-          <strong>报关宝</strong>
-          <span>关务制单与申报工作台</span>
+          <strong>录入页面</strong>
+          <span>报关单录入效果</span>
         </div>
         <div className="gateway-topbar-right">
-          <button className="primary-button" disabled={!valid}>模拟发送申报</button>
+          <button className="primary-button" disabled={!valid}>提交</button>
         </div>
       </div>
 
@@ -33,8 +33,8 @@ export default function SubmissionPreview({ preview }) {
           <div className="gateway-brand">BG</div>
           <nav className="gateway-menu">
             <button className="gateway-menu-item gateway-menu-item-active">报关制单</button>
-            <button className="gateway-menu-item">单证校验</button>
-            <button className="gateway-menu-item">申报记录</button>
+            <button className="gateway-menu-item">单据录入</button>
+            <button className="gateway-menu-item">单据列表</button>
             <button className="gateway-menu-item">基础资料</button>
           </nav>
         </aside>
@@ -43,7 +43,7 @@ export default function SubmissionPreview({ preview }) {
           <div className="gateway-toolbar">
             <div>
               <h3>报关单录入</h3>
-              <p className="muted">基于单证解析结果自动预填，样式参考报关平台后台工作台。</p>
+              <p className="muted">根据材料解析结果生成录入内容。</p>
             </div>
             <div className="gateway-metrics">
               <div><label>商品行</label><strong>{items.length}</strong></div>

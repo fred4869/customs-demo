@@ -16,7 +16,7 @@ export default function IssueResolver({ issues, onSubmit, busy }) {
           <h3>人工确认</h3>
           <span>无需处理</span>
         </div>
-        <p className="muted">当前没有冲突字段或缺失字段，系统可直接生成统一报关单。</p>
+        <p className="muted">当前没有需要补充的信息。</p>
       </section>
     )
   }

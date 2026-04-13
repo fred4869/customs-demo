@@ -20,9 +20,9 @@ const emptyState = {
 const workflowSkeleton = [
   { title: '材料接收', status: 'pending' },
   { title: '材料解析', status: 'pending' },
-  { title: '字段校验', status: 'pending' },
-  { title: '草单生成', status: 'pending' },
-  { title: '模拟提交', status: 'pending' }
+  { title: '信息核对', status: 'pending' },
+  { title: '报关单生成', status: 'pending' },
+  { title: '录入展示', status: 'pending' }
 ]
 
 export default function App() {
@@ -92,7 +92,7 @@ export default function App() {
     return [
       { label: '文件数', value: state.documents.length },
       { label: '商品行', value: state.declaration_draft?.items?.length || 0 },
-      { label: '待确认字段', value: openIssues.length },
+      { label: '待补充字段', value: openIssues.length },
       { label: '已完成节点', value: state.workflow.filter((node) => node.status === 'completed').length }
     ]
   }, [state, openIssues.length])
@@ -172,7 +172,7 @@ export default function App() {
       return
     }
 
-    if (/模拟提交/.test(node.title)) {
+    if (/录入展示|模拟提交/.test(node.title)) {
       setDeliveryTab('gateway')
       setActivePage('declaration')
       return
@@ -189,7 +189,7 @@ export default function App() {
         <div className="page-header-main">
           <div className="page-header-left">
             <div className="page-header-title">
-              <h1>原始单据解析与报关草单预览</h1>
+              <h1>出口报关单据解析</h1>
             </div>
           </div>
           <nav className="page-step-nav" aria-label="页面步骤">
@@ -197,7 +197,7 @@ export default function App() {
               <span className="page-step-index">01</span>
               <span className="page-step-copy">
                 <strong>首页进度</strong>
-                <small>输入原始单据与流程概览</small>
+                <small>材料上传与流程概览</small>
               </span>
             </button>
             <button
@@ -208,7 +208,7 @@ export default function App() {
               <span className="page-step-index">02</span>
               <span className="page-step-copy">
                 <strong>文件预览与确认</strong>
-                <small>查看原始单据并核对字段</small>
+                <small>查看材料并核对信息</small>
               </span>
             </button>
             <button
@@ -219,14 +219,10 @@ export default function App() {
               <span className="page-step-index">03</span>
               <span className="page-step-copy">
                 <strong>报关单预览</strong>
-                <small>生成草单并模拟提交</small>
+                <small>查看报关草单与录入效果</small>
               </span>
             </button>
           </nav>
-        </div>
-        <div className="header-meta">
-          <span className="meta-chip">一般贸易主场景</span>
-          <span className="meta-chip">仅原始材料参与抽取</span>
         </div>
       </header>
 
@@ -239,7 +235,7 @@ export default function App() {
               <div className="section-heading">
                 <div>
                   <p className="section-index">01</p>
-                  <h2>输入原始单据与流程进度</h2>
+                  <h2>材料输入与处理流程</h2>
                 </div>
               </div>
 
@@ -248,9 +244,9 @@ export default function App() {
                   <div className="input-entry input-entry-upload">
                     <div className="input-entry-head">
                       <span className="input-entry-label">方式 A</span>
-                      <h3>上传本地文件</h3>
+                      <h3>上传材料</h3>
                     </div>
-                    <p className="muted input-entry-note">支持 PDF、Excel、Word。只把原始业务材料作为输入，报关单样例页不参与抽取。</p>
+                    <p className="muted input-entry-note">支持 PDF、Excel、Word。</p>
                     <label className="primary-button upload-button upload-button-wide">
                       选择本地文件
                       <input type="file" multiple onChange={handleUpload} />
@@ -262,18 +258,18 @@ export default function App() {
                   <div className="input-entry input-entry-sample">
                     <div className="input-entry-head">
                       <span className="input-entry-label">方式 B</span>
-                      <h3>使用现成 Demo</h3>
+                      <h3>使用样例材料</h3>
                     </div>
-                    <p className="muted input-entry-note">默认推荐一般贸易主样例。9710 和施耐德仅作参考展示，最后一页或报关单 sheet 不参与抽取。</p>
+                    <p className="muted input-entry-note">可直接载入样例材料查看处理效果。</p>
                     <details className="sample-dropdown">
                       <summary className="sample-dropdown-trigger">
-                        <span>选择 Demo 样例包</span>
+                        <span>选择样例材料</span>
                         <small>{samplePackets.length} 个可选</small>
                       </summary>
                       <div className="sample-dropdown-list">
                         {samplePackets.map((packet, index) => (
                           <button key={packet.id} className="sample-card sample-card-inline" onClick={() => handleSample(packet.id)} disabled={loading}>
-                            <strong>{packet.label}{index === 0 ? ' · 推荐' : ''}</strong>
+                            <strong>{packet.label}</strong>
                             <span>{packet.description}</span>
                           </button>
                         ))}
@@ -295,7 +291,7 @@ export default function App() {
               {state.documents.length ? (
                 <div className="workflow-stage">
                   <div className="panel-header">
-                    <h3>Agent 工作流</h3>
+                    <h3>处理流程</h3>
                     <span>{workflowItems.length} 个节点</span>
                   </div>
                   <WorkflowPanel
@@ -308,7 +304,7 @@ export default function App() {
               ) : (
                 <div className="workflow-stage">
                   <div className="panel-header">
-                    <h3>Agent 工作流</h3>
+                    <h3>处理流程</h3>
                     <span>{workflowItems.length} 个节点</span>
                   </div>
                   <WorkflowPanel
@@ -316,7 +312,7 @@ export default function App() {
                     showHeader={false}
                     activeIndex={-1}
                   />
-                  <p className="muted">先上传文件或加载样例包，流程会从“文件接收”开始推进。</p>
+                  <p className="muted">上传材料后，这里会展示当前处理进度。</p>
                 </div>
               )}
             </section>
@@ -327,7 +323,7 @@ export default function App() {
               <div className="section-heading">
                 <div>
                   <p className="section-index">02</p>
-                  <h2>文件预览与字段确认</h2>
+                  <h2>文件预览与信息确认</h2>
                 </div>
               </div>
               {state.documents.length ? (
@@ -348,7 +344,7 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <EmptyState title="文件预览与确认" message="上传原始材料后，这里显示文件预览、抽取依据和待确认字段。参考样例页只用于对照，不参与抽取。" />
+                <EmptyState title="文件预览与信息确认" message="上传材料后，这里会显示文件预览与待补充信息。" />
               )}
             </section>
           )}
@@ -358,7 +354,7 @@ export default function App() {
               <div className="section-heading">
                 <div>
                   <p className="section-index">03</p>
-                  <h2>报关草单预览</h2>
+                  <h2>报关单预览</h2>
                 </div>
               </div>
               <div className="subpage-tabs">
@@ -366,20 +362,20 @@ export default function App() {
                   报关草单
                 </button>
                 <button className={`subpage-tab ${deliveryTab === 'gateway' ? 'subpage-tab-active' : ''}`} onClick={() => setDeliveryTab('gateway')}>
-                  模拟报关宝
+                  录入效果
                 </button>
               </div>
               <div className="declaration-stack">
                 {deliveryTab === 'declaration'
-                  ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="报关草单" message="完成原始材料解析后，这里会生成报关草单。" />)
-                  : (state.submission_preview ? <SubmissionPreview preview={state.submission_preview} /> : <EmptyState title="模拟提交" message="生成报关单后，这里展示模拟关务宝提交效果。" />)}
+                  ? (state.declaration_draft ? <DeclarationView draft={state.declaration_draft} /> : <EmptyState title="报关草单" message="完成材料解析后，这里会生成报关草单。" />)
+                  : (state.submission_preview ? <SubmissionPreview preview={state.submission_preview} /> : <EmptyState title="录入效果" message="生成报关草单后，这里展示录入页面效果。" />)}
               </div>
             </section>
           )}
         </section>
       </main>
 
-      {(loading || resolving) && <div className="loading-mask">{loading ? '正在解析单据...' : '正在应用人工确认...'}</div>}
+      {(loading || resolving) && <div className="loading-mask">{loading ? '正在处理材料...' : '正在更新结果...'}</div>}
     </div>
   )
 }
@@ -389,7 +385,7 @@ function EmptyState({ title, message }) {
     <section className="panel empty-panel">
       <div className="panel-header">
         <h3>{title}</h3>
-        <span>未生成</span>
+        <span>未开始</span>
       </div>
       <p className="muted">{message}</p>
     </section>

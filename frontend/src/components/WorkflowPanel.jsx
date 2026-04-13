@@ -3,7 +3,7 @@ export default function WorkflowPanel({ workflow, showHeader = true, activeIndex
     <section className="workflow-panel">
       {showHeader && (
         <div className="panel-header">
-          <h3>Agent 工作流</h3>
+          <h3>处理流程</h3>
           <span>{workflow.length} 个节点</span>
         </div>
       )}
