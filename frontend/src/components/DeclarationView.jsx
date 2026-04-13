@@ -179,7 +179,7 @@ function resolveSheetCellValue(header, item) {
   const value = header?.[item.field]
   if (value !== null && value !== undefined && value !== '') return formatDisplayValue(value)
   if (item.fallbackField) return formatDisplayValue(header?.[item.fallbackField])
-  return item.emptyText || ''
+  return item.emptyText || '待确认'
 }
 
 function padLineNo(value) {
