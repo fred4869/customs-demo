@@ -438,13 +438,15 @@ function buildHeaderCandidates(documentType, lines, filename, lineItems = [], wo
     pushCandidate(header.buyer_seller, normalizeWhitespace(domestic), 0.7, domestic)
   }
 
-  const countries = uniqBy(
-    COUNTRY_WORDS.map((word) => new RegExp(word, 'i').exec(text)?.[0]).filter(Boolean),
-    (value) => value.toLowerCase()
-  )
-  if (countries[0]) pushCandidate(header.trade_country, maybeCountry(countries[0]), 0.7, countries[0])
-  if (countries[1]) pushCandidate(header.destination_country, maybeCountry(countries[1]), 0.68, countries[1])
-  if (countries[0]) pushCandidate(header.origin_country, maybeCountry(countries[0]), 0.65, countries[0])
+  if (documentType !== DOC_TYPES.reference) {
+    const countries = uniqBy(
+      COUNTRY_WORDS.map((word) => new RegExp(word, 'i').exec(text)?.[0]).filter(Boolean),
+      (value) => value.toLowerCase()
+    )
+    if (countries[0]) pushCandidate(header.trade_country, maybeCountry(countries[0]), 0.7, countries[0])
+    if (countries[1]) pushCandidate(header.destination_country, maybeCountry(countries[1]), 0.68, countries[1])
+    if (countries[0]) pushCandidate(header.origin_country, maybeCountry(countries[0]), 0.65, countries[0])
+  }
 
   if (/hawb|awb|air/i.test(text)) {
     pushCandidate(header.transport_mode, 'AIR', 0.9, 'HAWB/AWB')
@@ -836,6 +838,9 @@ function applyReferenceSourceHeaderCandidates(header, lines) {
   const contractNo = matchText(text, [/Contract NO\.?\s*[:：]?\s*([A-Z0-9-]+)/i])
   if (contractNo) pushCandidate(header.contract_no, contractNo, 0.93, '合同页')
 
+  const currency = detectCurrency(text) || detectCurrency(lines.find((line) => /\b(?:us\$|usd|eur|cny|\$)\b/i.test(line)) || '')
+  if (currency) pushCandidate(header.currency, currency, 0.9, '源材料金额栏')
+
   const inco = extractInco(lines, text)
   if (inco) pushCandidate(header.terms_of_delivery, inco.toUpperCase(), 0.82, inco)
 
@@ -1106,10 +1111,6 @@ function build9710WorkbookHeaderCandidates(workbook, lineItems, filename) {
     pushCandidate(header.destination_country, destinationCountry, 0.84, routeLine)
   }
 
-  if (/ningbo port/i.test(routeLine)) {
-    pushCandidate(header.departure_port, '宁波', 0.82, routeLine)
-  }
-
   pushCandidate(header.origin_country, maybeCountry('china'), 0.8, '合同/装箱单')
 
   const packingTotals = extract9710PackingTotals(packingSheet)
@@ -1258,7 +1259,7 @@ function extract9710PackingTotals(sheet) {
     totals.net_weight_kg = parseNumber(totalRow?.[6]) !== null ? round2(parseNumber(totalRow?.[6])) : null
     totals.gross_weight_kg = parseNumber(totalRow?.[8]) !== null ? round2(parseNumber(totalRow?.[8])) : null
   }
-  if (sheetHasCartons(sheet)) totals.package_type = '纸箱'
+  if (sheetHasCartons(sheet)) totals.package_type = 'CTN'
   return totals
 }
 
@@ -1268,6 +1269,7 @@ function extract9710ShippingMarks(sheet) {
     .slice(1)
     .map((row) => normalizeWhitespace(row?.[0]))
     .filter(Boolean)
+    .filter((value) => !/^packing list$/i.test(value))
     .filter((value) => !/^shipping marks$/i.test(value))
     .filter((value) => !/^from:/i.test(value))
     .filter((value) => !/^total:?$/i.test(value))

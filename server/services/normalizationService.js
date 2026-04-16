@@ -97,8 +97,8 @@ export function buildNormalizedRecord(documents, resolutions = []) {
 export function buildDeclarationDraft(normalizedRecord) {
   const { header, goods_items: goodsItems, open_issues: openIssues } = normalizedRecord
   const issues = [...openIssues]
-  const declarationDate = new Date().toISOString().slice(0, 10)
-  const compactDate = declarationDate.replace(/-/g, '')
+  const declarationDate = null
+  const compactDate = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const primaryItem = goodsItems[0] ?? null
 
   if (!goodsItems.length) {
@@ -138,7 +138,7 @@ export function buildDeclarationDraft(normalizedRecord) {
       departure_port: header.departure_port ?? null,
       import_export_flag: header.import_export_flag,
       declaration_date: declarationDate,
-      import_export_date: compactDate,
+      import_export_date: null,
       domestic_consignor: header.domestic_consignor,
       overseas_consignor: header.overseas_consignor,
       buyer_seller: header.buyer_seller,

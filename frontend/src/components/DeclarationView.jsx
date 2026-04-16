@@ -148,7 +148,7 @@ function FragmentRow({ item, draft }) {
   return (
     <tr>
       <td>{padLineNo(item.line_no)}</td>
-      <td>{item.product_code || item.hs_code || ''}</td>
+      <td>{formatDisplayValue(item.product_code || item.hs_code) || '待确认'}</td>
       <td className="sheet-goods-cell">
         <div>{item.product_name_cn || item.product_name_en || ''}</div>
         <small>{item.spec_model || item.product_name_en || ''}</small>
@@ -159,7 +159,7 @@ function FragmentRow({ item, draft }) {
       <td>{formatDisplayValue(item.currency || draft.header?.currency)}</td>
       <td>{formatDisplayValue(item.origin_country || draft.header?.origin_country)}</td>
       <td>{formatDisplayValue(item.destination_country || draft.header?.destination_country)}</td>
-      <td>{formatDisplayValue(item.source_region || '')}</td>
+      <td>{formatDisplayValue(item.source_region) || '待确认'}</td>
     </tr>
   )
 }

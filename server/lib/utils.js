@@ -83,8 +83,8 @@ export function parseNumber(value) {
 
 export function detectCurrency(value = '') {
   const text = normalizeKey(value)
-  if (/(\busd\b|美元)/.test(text)) return 'USD'
-  if (/(\beur\b|欧元)/.test(text)) return 'EUR'
+  if (/(\busd\b|us\$|美元)/.test(text)) return 'USD'
+  if (/(\beur\b|eur\$|欧元)/.test(text)) return 'EUR'
   if (/(\bcny\b|人民币|rmb)/.test(text)) return 'CNY'
   return null
 }
